@@ -1,0 +1,39 @@
+# Boldpiq Website Audit — internal web app
+#
+# IMPORTANT: the port is bound to localhost only. There is no authentication in
+# the app itself; access is granted by the Cloudflare Tunnel + Access policy in
+# front of it, exactly like n8n. Never publish this port to 0.0.0.0.
+
+services:
+  audit:
+    build: .
+    image: boldpiq/website-audit:latest
+    container_name: boldpiq-audit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      # Finished PDFs and scan JSON survive rebuilds and redeploys.
+      - audit-reports:/data/reports
+    environment:
+      # Courtesy gap between consecutive scans. seoscore.tools' terms forbid
+      # excessive scanning and jobs already run one at a time — this is the
+      # second layer of that promise.
+      BOLDPIQ_JOB_GAP: "6"
+      BOLDPIQ_JOB_TIMEOUT: "600"
+    # Chrome is memory-hungry in bursts. Capping keeps a runaway scan from
+    # taking n8n and Zammad down with it.
+    mem_limit: 2g
+    cpus: 1.5
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      # Chromium's shared memory. Without this it falls back to /dev/shm at 64MB
+      # and crashes on heavy pages.
+      - /tmp:size=512m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  audit-reports:

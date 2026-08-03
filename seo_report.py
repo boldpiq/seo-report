@@ -20,6 +20,7 @@ import html
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import sys
@@ -31,12 +32,17 @@ import urllib.request
 from checks import CHECKS
 import platforms as plat
 import lighthouse as lh
+import runtime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT = os.path.join(HERE, "assets", "geist-latin.woff2")
-REPORTS = os.path.join(HERE, "reports")
+REPORTS = os.environ.get("BOLDPIQ_REPORTS") or os.path.join(HERE, "reports")
+# Finished PDFs land here too, so a report is ready to forward without digging
+# through the tool directory. Scan JSON stays in reports/ — it is working data,
+# not something to hand a client. Headless servers have no Desktop; there the
+# reports directory is the only destination.
+DESKTOP = runtime.deliver_dir()
 API = "https://seoscore.tools/api/scan"
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 # Boldpiq brand
 INK = "#0B0F1C"        # near-black navy
@@ -1093,12 +1099,15 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 # ── render ───────────────────────────────────────────────────────────────────
 
 def render_pdf(html_path, pdf_path):
-    if not os.path.exists(CHROME):
-        raise SystemExit(f"Google Chrome not found at {CHROME}")
-    cmd = [CHROME, "--headless", "--disable-gpu", "--no-sandbox",
+    chrome = runtime.find_chrome()
+    if not chrome:
+        raise SystemExit("No Chromium-family browser found. Install Google Chrome, "
+                         "or set BOLDPIQ_CHROME to the browser executable.")
+    cmd = [chrome] + runtime.CHROME_FLAGS + [
            "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
            "--virtual-time-budget=10000",
-           f"--print-to-pdf={pdf_path}", f"file://{html_path}"]
+           f"--print-to-pdf={pdf_path}",
+           urllib.parse.urljoin("file:", urllib.request.pathname2url(html_path))]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if not os.path.exists(pdf_path):
         raise SystemExit(f"Chrome failed to produce a PDF:\n{r.stderr[-600:]}")
@@ -1124,6 +1133,8 @@ def main():
     ap.add_argument("--client", help="client name for the cover (default: domain)")
     ap.add_argument("--keyphrase", default="", help="target keyphrase to score against")
     ap.add_argument("--out", default=REPORTS, help="output directory")
+    ap.add_argument("--no-desktop", action="store_true",
+                    help="don't also drop the finished PDF on the Desktop")
     ap.add_argument("--keep-html", action="store_true", help="keep the intermediate HTML")
     ap.add_argument("--open", dest="open_pdf", action="store_true", help="open the PDF when done")
     ap.add_argument("--from-json", help="render from a saved scan JSON instead of scanning")
@@ -1193,11 +1204,22 @@ def main():
                   f"a11y {s.get('accessibility')} · "
                   f"best-practice {s.get('best-practices')} · "
                   f"agentic {s.get('agentic-browsing')}")
-        print(f"   {pdf_path}")
-        made.append(pdf_path)
+        # Copy rather than move: reports/ stays the archive alongside the scan
+        # JSON, the Desktop copy is the one to forward.
+        delivered = pdf_path
+        if not a.no_desktop and DESKTOP and os.path.isdir(DESKTOP):
+            try:
+                delivered = os.path.join(DESKTOP, os.path.basename(pdf_path))
+                shutil.copyfile(pdf_path, delivered)
+            except OSError as err:
+                delivered = pdf_path
+                print(f"   could not copy to Desktop ({err}) — left in reports/",
+                      file=sys.stderr)
+        print(f"   {delivered}")
+        made.append(delivered)
 
     if a.open_pdf and made:
-        subprocess.run(["open"] + made)
+        runtime.open_files(made)
 
 
 if __name__ == "__main__":

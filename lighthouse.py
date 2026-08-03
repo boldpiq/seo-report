@@ -21,11 +21,9 @@ import shutil
 import subprocess
 import tempfile
 
+import runtime
+
 HOME = os.path.expanduser("~")
-LH_CANDIDATES = [
-    os.path.join(HOME, "boldpiq-tools/site-audit/node_modules/.bin/lighthouse"),
-    os.path.join(HOME, "boldpiq-tools/seo-report/node_modules/.bin/lighthouse"),
-]
 
 CATEGORIES = ["performance", "accessibility", "best-practices", "seo",
               "agentic-browsing"]
@@ -507,20 +505,11 @@ def _clean(text):
 
 def _node_dir():
     """Find node, including an fnm-managed install that is not on PATH."""
-    found = shutil.which("node")
-    if found:
-        return os.path.dirname(found)
-    for pat in ("/.local/share/fnm/node-versions/*/installation/bin/node",
-                "/.fnm/node-versions/*/installation/bin/node",
-                "/.nvm/versions/node/*/bin/node"):
-        hits = sorted(glob.glob(HOME + pat))
-        if hits:
-            return os.path.dirname(hits[-1])
-    return None
+    return runtime.node_dir()
 
 
 def available():
-    binary = next((p for p in LH_CANDIDATES if os.path.exists(p)), None)
+    binary = runtime.lighthouse_bin()
     return (binary, _node_dir()) if binary and _node_dir() else (None, None)
 
 
@@ -532,10 +521,18 @@ def run(url, form_factor="mobile", timeout=180):
 
     env = dict(os.environ)
     env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+    # Point Lighthouse at whichever Chromium we found. Without this it hunts for
+    # its own, which fails in the container and picks the wrong browser on a
+    # machine with both Chrome and Edge installed.
+    chrome = runtime.find_chrome()
+    if chrome:
+        env["CHROME_PATH"] = chrome
 
     out = os.path.join(tempfile.mkdtemp(prefix="bp-lh-"), "lh.json")
-    cmd = [binary, url, "--quiet", "--output=json", f"--output-path={out}",
-           "--chrome-flags=--headless --no-sandbox --disable-gpu",
+    # A .js entrypoint (global npm install) has no shebang we can rely on.
+    launcher = [os.path.join(node_dir, "node"), binary] if binary.endswith(".js") else [binary]
+    cmd = launcher + [url, "--quiet", "--output=json", f"--output-path={out}",
+           "--chrome-flags=" + " ".join(runtime.CHROME_FLAGS),
            "--only-categories=" + ",".join(CATEGORIES),
            f"--form-factor={form_factor}",
            "--max-wait-for-load=45000"]

@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Boldpiq — Website Audit</title>
+<style>
+  :root{
+    --ink:#0B0F1C; --accent:#C4541A; --paper:#fff;
+    --surface:rgba(255,255,255,.04); --border:rgba(255,255,255,.10);
+    --muted:rgba(255,255,255,.60); --muted-dim:rgba(255,255,255,.38);
+    --ok:#3FB950; --warn:#D29922; --bad:#F85149;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ink); color:var(--paper);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .glow{position:fixed;inset:-200px;pointer-events:none;z-index:0;
+    background:radial-gradient(ellipse 46% 40% at 18% 12%,rgba(196,84,26,.28) 0%,transparent 65%),
+               radial-gradient(ellipse 34% 30% at 86% 78%,rgba(196,84,26,.14) 0%,transparent 60%);}
+  .wrap{position:relative;z-index:1;max-width:820px;margin:0 auto;padding:56px 22px 96px}
+
+  header{margin-bottom:44px}
+  .eyebrow{display:flex;gap:14px;align-items:center;margin-bottom:20px}
+  .eyebrow i{display:block;width:32px;height:1px;background:var(--accent)}
+  .eyebrow span{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  h1{font-size:clamp(34px,6vw,58px);font-weight:900;letter-spacing:-.035em;line-height:1;margin:0 0 14px}
+  h1 em{font-style:normal;color:var(--accent)}
+  .lede{color:var(--muted);max-width:60ch;margin:0}
+
+  .card{border:1px solid var(--border);border-radius:20px;background:var(--surface);
+    padding:clamp(22px,4vw,34px);position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;
+    background:linear-gradient(90deg,var(--accent),transparent 60%)}
+
+  label{display:block;font-size:13px;font-weight:600;letter-spacing:.01em;margin:0 0 7px}
+  .hint{font-size:12.5px;color:var(--muted-dim);margin:6px 0 0;line-height:1.5}
+  input[type=text]{
+    width:100%;padding:13px 15px;border-radius:11px;background:rgba(0,0,0,.28);
+    border:1px solid var(--border);color:var(--paper);font-size:15px;font-family:inherit;
+    transition:border-color .18s,box-shadow .18s}
+  input[type=text]::placeholder{color:rgba(255,255,255,.28)}
+  input[type=text]:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 3px rgba(196,84,26,.18)}
+  .field{margin-bottom:22px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:620px){.row{grid-template-columns:1fr}}
+
+  details.more{margin:4px 0 24px;border-top:1px solid var(--border);padding-top:18px}
+  details.more summary{cursor:pointer;font-size:13px;color:var(--muted);
+    list-style:none;user-select:none}
+  details.more summary::-webkit-details-marker{display:none}
+  details.more summary::before{content:"▸ ";color:var(--accent)}
+  details.more[open] summary::before{content:"▾ "}
+  details.more .inner{padding-top:20px}
+
+  .toggle{display:flex;align-items:flex-start;gap:11px;margin-bottom:16px;cursor:pointer}
+  .toggle input{margin:4px 0 0;accent-color:var(--accent);width:16px;height:16px;flex:none}
+  .toggle span{font-size:14px}
+  .toggle .hint{margin-top:3px}
+
+  button.go{
+    width:100%;padding:16px;border:0;border-radius:12px;background:var(--accent);
+    color:#fff;font-size:16px;font-weight:800;letter-spacing:.01em;cursor:pointer;
+    font-family:inherit;transition:transform .12s,filter .18s}
+  button.go:hover:not(:disabled){filter:brightness(1.1)}
+  button.go:active:not(:disabled){transform:scale(.985)}
+  button.go:disabled{opacity:.45;cursor:not-allowed}
+
+  /* status */
+  #status{display:none;margin-top:26px;border-top:1px solid var(--border);padding-top:26px}
+  #status.on{display:block}
+  .bar{height:6px;border-radius:99px;background:rgba(255,255,255,.09);overflow:hidden;margin:16px 0 12px}
+  .bar i{display:block;height:100%;width:0;border-radius:99px;background:var(--accent);
+    transition:width .6s cubic-bezier(.33,1,.68,1)}
+  .stateline{display:flex;align-items:center;gap:11px;font-size:15px}
+  .spinner{width:15px;height:15px;border:2px solid rgba(255,255,255,.18);
+    border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .elapsed{font-size:12.5px;color:var(--muted-dim);margin-top:10px}
+  .scores{font-size:13.5px;color:var(--muted);margin-top:14px;font-variant-numeric:tabular-nums}
+
+  .done{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:20px}
+  .btn{display:inline-block;padding:12px 20px;border-radius:11px;font-size:14px;
+    font-weight:700;text-decoration:none;cursor:pointer;border:1px solid var(--border);
+    background:transparent;color:var(--paper);font-family:inherit}
+  .btn.primary{background:var(--accent);border-color:var(--accent)}
+  .btn:hover{filter:brightness(1.12)}
+
+  .error{border:1px solid rgba(248,81,73,.4);background:rgba(248,81,73,.09);
+    border-radius:12px;padding:16px 18px;margin-top:18px;font-size:14px}
+  .error b{display:block;margin-bottom:6px;color:#FF9A93}
+  .error pre{white-space:pre-wrap;word-break:break-word;margin:8px 0 0;
+    font-size:12px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* recent */
+  section.recent{margin-top:52px}
+  section.recent h2{font-size:13px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;margin:0 0 16px}
+  .rep{display:flex;justify-content:space-between;align-items:center;gap:16px;
+    padding:13px 16px;border:1px solid var(--border);border-radius:12px;
+    background:var(--surface);margin-bottom:9px;text-decoration:none;color:inherit;
+    transition:border-color .18s,background .18s}
+  .rep:hover{border-color:rgba(196,84,26,.5);background:rgba(196,84,26,.06)}
+  .rep .site{font-weight:600;font-size:14.5px;word-break:break-all}
+  .rep .meta{font-size:12px;color:var(--muted-dim);margin-top:2px}
+  .rep .dl{font-size:12px;color:var(--accent);font-weight:700;flex:none}
+  .empty{color:var(--muted-dim);font-size:14px}
+
+  footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--border);
+    font-size:12.5px;color:var(--muted-dim);display:flex;justify-content:space-between;
+    gap:14px;flex-wrap:wrap}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;
+    vertical-align:middle;background:var(--muted-dim)}
+  .dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow"><i></i><span>Boldpiq · Internal</span></div>
+    <h1>Website <em>Audit</em></h1>
+    <p class="lede">Enter a prospect's website address and get a branded PDF
+      visibility report. Takes about a minute — most of that is measuring the
+      site's real load speed in Chrome.</p>
+  </header>
+
+  <div class="card">
+    <form id="form" autocomplete="off">
+      <div class="field">
+        <label for="url">Website address</label>
+        <input type="text" id="url" name="url" placeholder="clientdomain.co.za"
+               spellcheck="false" required>
+        <p class="hint">Just the address is fine — no need to type https://</p>
+      </div>
+
+      <div class="field">
+        <label for="client">Client name <span style="color:var(--muted-dim);font-weight:400">(optional)</span></label>
+        <input type="text" id="client" name="client" placeholder="JMT Handyman Services">
+        <p class="hint">Appears on the report cover. Leave blank to use the domain name.</p>
+      </div>
+
+      <details class="more">
+        <summary>More options</summary>
+        <div class="inner">
+          <div class="field">
+            <label for="keyphrase">Target keyphrase <span style="color:var(--muted-dim);font-weight:400">(optional)</span></label>
+            <input type="text" id="keyphrase" name="keyphrase" placeholder="roof repairs cape town">
+            <p class="hint">Scores the site against a search term you'd expect it to rank for.</p>
+          </div>
+
+          <label class="toggle">
+            <input type="checkbox" id="desktop">
+            <span>Measure as desktop
+              <span class="hint">Default is mobile, which is how most visitors and Google see the site. Only switch this for a desktop-only tool.</span>
+            </span>
+          </label>
+
+          <label class="toggle">
+            <input type="checkbox" id="skiplh">
+            <span>Skip the Chrome measurements (faster)
+              <span class="hint">About 30 seconds quicker, but drops four sections: speed, accessibility, best practices and agentic browsing.</span>
+            </span>
+          </label>
+        </div>
+      </details>
+
+      <button class="go" id="go" type="submit">Generate report</button>
+    </form>
+
+    <div id="status">
+      <div class="stateline">
+        <span class="spinner" id="spin"></span>
+        <span id="msg">Starting…</span>
+      </div>
+      <div class="bar"><i id="fill"></i></div>
+      <div class="elapsed" id="elapsed"></div>
+      <div class="scores" id="scores"></div>
+      <div id="result"></div>
+    </div>
+  </div>
+
+  <section class="recent">
+    <h2>Recent reports</h2>
+    <div id="recent"><p class="empty">Loading…</p></div>
+  </section>
+
+  <footer>
+    <span id="health"><span class="dot"></span>Checking…</span>
+    <span>Reports are stored on the server. Nothing is sent to a third party
+      except the site being scanned.</span>
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let timer = null, poll = null, started = 0;
+
+function fmtTime(s){ return s < 60 ? s + "s" : Math.floor(s/60) + "m " + (s%60) + "s"; }
+
+async function health(){
+  try{
+    const h = await (await fetch("/api/health")).json();
+    const dot = h.ok ? "ok" : "bad";
+    let text = h.ok ? `${h.browser} ready` : "No browser found — reports will fail";
+    if (h.ok && !h.lighthouse) text += " · Lighthouse missing (4 sections will be skipped)";
+    $("health").innerHTML = `<span class="dot ${dot}"></span>${text}`;
+  }catch(e){
+    $("health").innerHTML = `<span class="dot bad"></span>Server not responding`;
+  }
+}
+
+async function loadRecent(){
+  try{
+    const {reports} = await (await fetch("/api/reports")).json();
+    if(!reports.length){
+      $("recent").innerHTML = `<p class="empty">No reports yet. Your first one will appear here.</p>`;
+      return;
+    }
+    $("recent").innerHTML = reports.map(r => {
+      const when = new Date(r.modified*1000).toLocaleString([], {
+        day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
+      return `<a class="rep" href="/download/${encodeURIComponent(r.file)}" target="_blank" rel="noopener">
+        <span><span class="site">${r.site}</span><span class="meta">${when} · ${r.size_kb} KB</span></span>
+        <span class="dl">Open ↗</span></a>`;
+    }).join("");
+  }catch(e){ /* leave whatever was there */ }
+}
+
+function stop(){ clearInterval(timer); clearInterval(poll); timer = poll = null; }
+
+function finish(job){
+  stop();
+  $("spin").style.display = "none";
+  $("fill").style.width = "100%";
+
+  if(job.state === "error"){
+    $("msg").textContent = "That didn't work.";
+    $("result").innerHTML = `<div class="error"><b>Report failed</b>
+      The site may be unreachable, very slow, or blocking automated visits.
+      Check the address and try again.<pre>${escapeHtml(job.error || "")}</pre></div>`;
+    return;
+  }
+
+  $("msg").textContent = "Report ready.";
+  const href = "/download/" + encodeURIComponent(job.pdf);
+  $("result").innerHTML = `<div class="done">
+      <a class="btn primary" href="${href}" target="_blank" rel="noopener">Open the report</a>
+      <a class="btn" href="${href}" download>Download PDF</a>
+      <button class="btn" type="button" onclick="reset()">Audit another site</button>
+    </div>`;
+  loadRecent();
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+window.reset = function(){
+  stop();
+  $("status").classList.remove("on");
+  $("go").disabled = false;
+  $("go").textContent = "Generate report";
+  $("result").innerHTML = "";
+  $("scores").textContent = "";
+  $("elapsed").textContent = "";
+  $("fill").style.width = "0";
+  $("spin").style.display = "";
+  $("url").focus();
+};
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const url = $("url").value.trim();
+  if(!url) return;
+
+  $("go").disabled = true;
+  $("go").textContent = "Working…";
+  $("status").classList.add("on");
+  $("result").innerHTML = "";
+  $("scores").textContent = "";
+  $("msg").textContent = "Starting…";
+  $("fill").style.width = "4%";
+  $("spin").style.display = "";
+  started = Date.now();
+
+  timer = setInterval(() => {
+    $("elapsed").textContent =
+      "Elapsed " + fmtTime(Math.floor((Date.now()-started)/1000)) +
+      " · a typical report takes about a minute";
+  }, 1000);
+
+  let job;
+  try{
+    const res = await fetch("/api/scan", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        url,
+        client: $("client").value.trim(),
+        keyphrase: $("keyphrase").value.trim(),
+        desktop: $("desktop").checked,
+        lighthouse: !$("skiplh").checked,
+      })
+    });
+    job = await res.json();
+    if(!res.ok){ finish({state:"error", error: job.error || "Request rejected."}); return; }
+  }catch(err){
+    finish({state:"error", error:"Could not reach the server. Is it still running?"});
+    return;
+  }
+
+  poll = setInterval(async () => {
+    try{
+      const j = await (await fetch("/api/job/" + job.id)).json();
+      $("msg").textContent = j.message || "Working…";
+      if(j.percent) $("fill").style.width = j.percent + "%";
+      if(j.summary) $("scores").textContent = j.summary;
+      if(j.state === "done" || j.state === "error") finish(j);
+    }catch(err){ /* transient — keep polling */ }
+  }, 1500);
+});
+
+health(); loadRecent();
+setInterval(health, 30000);
+$("url").focus();
+</script>
+</body>
+</html>
