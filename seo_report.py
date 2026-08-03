@@ -567,6 +567,8 @@ def agentic_section(l):
 def build_html(data, an, client, generated):
     site = urllib.parse.urlparse(data.get("url", "")).netloc or data.get("url", "")
     display = client or site.replace("www.", "")
+    # The exact URL that was scanned — the client must be able to see what we tested.
+    audited = data.get("url", "") or site
     st = data.get("siteType") or {}
     cms = st.get("detectedCms")
     kind = (st.get("siteType") or "").replace("_", " ")
@@ -771,6 +773,10 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 .csub{{font-size:12pt;color:#B7BECD;max-width:130mm;margin-bottom:9mm}}
 .csite{{font-size:19pt;font-weight:600;color:#fff;padding:4mm 0 3mm;
   border-top:1px solid #262C3D;border-bottom:1px solid #262C3D;margin-bottom:9mm}}
+.curl{{display:block;font-size:10.5pt;font-weight:500;color:{ACCENT};
+  margin-top:2.5mm;word-break:break-all}}
+.curl em{{display:block;font-size:8pt;color:#8B93A5;font-style:normal;font-weight:400;
+  letter-spacing:.12em;text-transform:uppercase;margin-bottom:1mm}}
 .csite small{{display:block;font-size:8.5pt;color:#8B93A5;font-weight:400;
   letter-spacing:.12em;text-transform:uppercase;margin-bottom:1.5mm}}
 .overall{{display:flex;align-items:center;gap:6mm;margin-bottom:9mm}}
@@ -964,7 +970,8 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
   <p class="csub">An independent audit of how this website performs in Google search
     and in AI assistants — and exactly what to fix first.</p>
 
-  <div class="csite"><small>Prepared for</small>{e(display)}</div>
+  <div class="csite"><small>Prepared for</small>{e(display)}
+    <span class="curl"><em>Page audited</em>{e(audited)}</span></div>
 
   <div class="overall">
     <div class="obig">{an['overall'] if an['overall'] is not None else '—'}<small>/100</small></div>
