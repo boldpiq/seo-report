@@ -13,10 +13,11 @@ services:
     ports:
       - "127.0.0.1:8090:8090"
     networks:
-      # Joins the network cloudflared already sits on, so the tunnel can reach
-      # this container by name (http://boldpiq-audit:8090) without the port ever
-      # being exposed beyond localhost.
-      - n8n_tunnel
+      # Private network shared only with this app's own cloudflared connector.
+      # Deliberately NOT the n8n tunnel network: that tunnel's catch-all proxies
+      # to n8n, so any unrouted hostname on it serves the n8n UI. A dedicated
+      # tunnel with a single origin cannot fall through to anything.
+      - audit_net
     volumes:
       # Finished PDFs and scan JSON survive rebuilds and redeploys.
       - audit-reports:/data/reports
@@ -40,9 +41,32 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  # Dedicated Cloudflare connector for this app and nothing else.
+  #
+  # --url pins the ONLY origin this tunnel can ever reach. There is no catch-all
+  # to fall through to, so a stray hostname pointed here reaches the audit app
+  # or nothing — never another service.
+  #
+  # TUNNEL_TOKEN lives in .env on the server (git-ignored, chmod 600). It is a
+  # credential: anyone holding it can connect a tunnel into the account.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: boldpiq-audit-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --protocol http2 run --token ${TUNNEL_TOKEN} --url http://boldpiq-audit:8090
+    depends_on:
+      - audit
+    networks:
+      - audit_net
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
 volumes:
   audit-reports:
 
 networks:
-  n8n_tunnel:
-    external: true
+  audit_net:

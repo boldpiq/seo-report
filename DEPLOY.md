@@ -61,17 +61,25 @@ Do not remove the cap to make it fit.
 Same pattern as n8n. Two pieces: a Tunnel to reach it, and an Access policy to
 decide who may.
 
-1. **Tunnel** — the `cloudflared` container on this box is **token-managed**, so
-   its routes live in the Cloudflare dashboard, not in a file on the server.
-   There is nothing to edit over SSH.
+1. **Tunnel** — this app runs its **own** `cloudflared` connector
+   (`boldpiq-audit-tunnel`, tunnel `ee8e3dbf-…`), deliberately NOT the shared n8n
+   tunnel. The shared one proxies its catch-all to n8n, so any unrouted hostname
+   on it serves the n8n UI. A dedicated tunnel with one origin cannot.
 
-   Zero Trust → Networks → Tunnels → (the existing tunnel) → Public Hostname → Add:
-   - Subdomain: `audit`  ·  Domain: `boldpiq.com`
-   - Service: `HTTP`  →  `boldpiq-audit:8090`
+   Its routes live in the Cloudflare dashboard — the tunnel is token-managed, so
+   there is nothing to edit over SSH. Current config:
 
-   The audit container is attached to the `n8n_tunnel` network, so cloudflared
-   resolves it by container name. Verified reachable at that exact URL from
-   inside the network. No firewall port needs opening; the tunnel dials out.
+   ```
+   ingress: audit.boldpiq.com → http://boldpiq-audit:8090
+            catch-all         → http_status:404
+   ```
+
+   **The dashboard config overrides the `--url` flag in docker-compose.yml.**
+   That flag is a fallback only; to add or change a hostname, do it in
+   Zero Trust → Networks → Tunnels → boldpiq-audit → Public Hostname.
+
+   `TUNNEL_TOKEN` lives in `/opt/seo-report/.env` (git-ignored, chmod 600). It is
+   a credential — anyone holding it can connect a tunnel into the account.
 
 2. **Access policy** — Cloudflare Zero Trust → Access → Applications → Add:
    - Type: Self-hosted
@@ -82,15 +90,29 @@ decide who may.
 
    Free tier covers up to 50 users.
 
-3. **Verify the lock actually holds.** Open the hostname in a private window and
-   confirm you get the Cloudflare login *before* the app. Then, on the box:
+3. **Verify the lock actually holds — properly.** One request is not enough.
+   Access policies propagate across Cloudflare's edge over seconds to minutes,
+   and during that window *some* edges enforce while others do not. A single
+   200 among twenty 302s is an open endpoint, not a fluke.
 
    ```bash
+   # 20 requests; any that render the app are a leak
+   for i in $(seq 1 20); do
+     code=$(curl -s -o /tmp/v -w "%{http_code}" https://audit.boldpiq.com/)
+     grep -q 'Boldpiq · Internal' /tmp/v && echo "#$i $code LEAK" || echo "#$i $code gated"
+     sleep 3
+   done
    ss -tlnp | grep 8090      # must show 127.0.0.1:8090, never 0.0.0.0:8090
    ```
 
-   This is the check that was missed when Zammad ended up internet-exposed. Do
-   it every time.
+   **Order matters.** Confirm the gate enforces on a hostname BEFORE pointing a
+   live origin at it. During this deploy the Access app was repointed while the
+   original hostname was still routed, and the tool was briefly served
+   unauthenticated. If you must change hostname or policy, stop the connector
+   first (`docker stop boldpiq-audit-tunnel`), make the change, verify 20/20,
+   then start it again.
+
+   This is the same check that was missed when Zammad ended up internet-exposed.
 
 ## Updating
 
