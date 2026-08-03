@@ -30,6 +30,7 @@ import urllib.request
 
 from checks import CHECKS
 import platforms as plat
+import lighthouse as lh
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT = os.path.join(HERE, "assets", "geist-latin.woff2")
@@ -180,6 +181,40 @@ def band(score):
     return "good" if score >= 80 else ("fair" if score >= 50 else "poor")
 
 
+VERDICTS = {
+    "performance": [
+        (90, "Excellent — genuinely fast, even on a mid-range phone."),
+        (75, "Good — quick enough that speed is not costing you visitors."),
+        (50, "Needs work — noticeably slow on mobile data, which is how most local "
+             "customers arrive."),
+        (0,  "Poor — slow enough that a meaningful share of visitors leave before the "
+             "page finishes appearing."),
+    ],
+    "accessibility": [
+        (95, "Excellent — no machine-detectable barriers, which is rarer than it should be."),
+        (85, "Good — mostly accessible, with a small number of fixable barriers."),
+        (65, "Needs work — real barriers here will be excluding real customers."),
+        (0,  "Poor — significant barriers. Parts of this site are unusable with a "
+             "screen reader or a keyboard."),
+    ],
+    "agentic": [
+        (90, "Excellent — an AI agent can navigate and operate this site."),
+        (70, "Good — mostly operable by an agent, with gaps worth closing."),
+        (50, "Needs work — an agent would struggle to complete a task here."),
+        (0,  "Poor — an AI agent cannot reliably use this site on a customer's behalf."),
+    ],
+}
+
+
+def verdict_for(kind, score):
+    if score is None:
+        return "Not measured"
+    for floor, text in VERDICTS[kind]:
+        if score >= floor:
+            return text
+    return "Not measured"
+
+
 def verdict(score):
     if score is None:
         return "Not measured"
@@ -272,6 +307,263 @@ def issue_card(i, n, platform_name):
 </article>"""
 
 
+LH_LABEL = {"performance": "Performance", "accessibility": "Accessibility",
+            "best-practices": "Best practices", "seo": "Lighthouse SEO",
+            "agentic-browsing": "Agentic browsing"}
+
+GLOSSARY = [
+    ("SEO", "Search Engine Optimisation — making a site easy for Google to find, "
+            "understand and rank."),
+    ("AEO", "Answer Engine Optimisation — making a site easy for an AI assistant to "
+            "read and quote."),
+    ("GEO", "Generative Engine Optimisation — making a site likely to be recommended "
+            "by name in an AI answer."),
+    ("Agentic browsing", "Whether an AI agent can actually operate the site — click, "
+                         "fill in and complete a task — not just read it."),
+    ("Crawler / bot", "An automated program that reads websites. Google uses one to "
+                      "build search results; ChatGPT and Claude use their own."),
+    ("Indexing", "Being stored in a search engine's library. If a page is not indexed, "
+                 "it cannot appear in results at all."),
+    ("Title tag", "The blue clickable headline in Google results and the text on the "
+                  "browser tab."),
+    ("Meta description", "The two grey lines under your Google listing. Your free "
+                         "advert."),
+    ("H1 / H2 / H3", "The headline and subheadings on a page. They tell readers and "
+                     "machines how the page is organised."),
+    ("ALT text", "A written description of an image, read aloud to blind visitors and "
+                 "used by search engines to understand the picture."),
+    ("Schema / structured data", "A hidden, machine-readable fact sheet on the page: "
+                                 "your address, hours, services and prices."),
+    ("JSON-LD", "The standard format that structured data is written in."),
+    ("Canonical tag", "A note telling Google which version of a page is the real one, "
+                      "so duplicates do not compete with each other."),
+    ("robots.txt", "A file at the root of your site telling crawlers which pages they "
+                   "may read. One wrong line here can hide an entire website."),
+    ("Sitemap", "A list of your pages submitted to search engines so nothing is missed."),
+    ("Open Graph", "The tags controlling the image and headline shown when your link is "
+                   "shared on WhatsApp, Facebook or LinkedIn."),
+    ("HTTPS", "The padlock in the address bar. Without it browsers warn visitors that "
+              "the site is not secure."),
+    ("Core Web Vitals", "Google's three official speed and stability measurements: LCP, "
+                        "CLS and responsiveness."),
+    ("LCP", "Largest Contentful Paint — how long until the main content is visible. "
+            "Should be under 2.5 seconds."),
+    ("CLS", "Cumulative Layout Shift — how much the page jumps around while loading. "
+            "It is why people tap the wrong button."),
+    ("TBT", "Total Blocking Time — how long the page ignores taps because it is busy "
+            "running code."),
+    ("Render-blocking", "A file the browser must finish downloading before it can show "
+                        "anything at all — the cause of a blank screen."),
+    ("Lazy loading", "Delaying images below the fold so the visible part of the page "
+                     "loads first."),
+    ("WCAG", "The international accessibility guidelines: can the site be used with a "
+             "screen reader, a keyboard, or poor eyesight."),
+    ("ARIA", "Extra markup that tells screen readers what a control is and does."),
+    ("Screen reader", "Software that reads a page aloud, used by blind and partially "
+                      "sighted visitors."),
+    ("E-E-A-T", "Experience, Expertise, Authority, Trust — what Google and AI systems "
+                "look for before relying on your content."),
+    ("Featured snippet", "The answer box quoted at the top of Google results, above the "
+                         "normal listings."),
+    ("AI Overview", "Google's AI-written answer at the top of the results page."),
+    ("Hydration", "The extra data a modern JavaScript website ships so the page becomes "
+                  "interactive. It makes pages look code-heavy to automated checks."),
+    ("llms.txt", "An emerging file that gives AI systems a summary map of your site."),
+    ("WebMCP", "A very new standard letting a website publish actions — book, quote, "
+               "search — that an AI agent can call directly."),
+]
+
+
+def glossary_section():
+    rows = "".join(f'<div class="grow"><dt>{e(t)}</dt><dd>{e(d)}</dd></div>'
+                   for t, d in GLOSSARY)
+    return f"""<section class="page">
+  <h2 class="sec">Plain English glossary</h2>
+  <p class="lead">Every term used in this report, in one line each. Nothing here needs
+    to be memorised — it is here so no part of the report is a black box.</p>
+  <dl class="gloss">{rows}</dl>
+</section>"""
+
+
+def lh_card(i, n):
+    fix = (f'<div class="blk"><span class="lbl">How it gets fixed</span>'
+           f'<p>{e(i["fix"])}</p></div>') if i["fix"] else ""
+    found = (f'<p class="finding">{e(i["display"])}</p>' if i["display"]
+             else (f'<p class="finding">{i["count"]} element(s) affected</p>'
+                   if i["count"] else ""))
+    sev = "high" if i["severity"] == "high" else "medium"
+    return f"""<article class="issue p-{sev}">
+  <header><span class="num">{n}</span>
+    <div class="ih"><h4>{e(i['title'])}</h4>{found}</div>
+    <div class="tags"><span class="tag pri">{'Fails' if i['score'] == 0 else 'Partial'}</span></div>
+  </header>
+  <div class="body">
+    <div class="blk"><span class="lbl">Why it matters</span><p>{e(i['why'])}</p></div>
+    {fix}
+  </div>
+</article>"""
+
+
+def lh_sections(l):
+    """The two Lighthouse pages: speed, then accessibility and best practices."""
+    if not l:
+        return ""
+    ff = "a simulated mid-range Android phone on a throttled 4G connection" \
+        if l["form_factor"] == "mobile" else "a desktop browser on a fast connection"
+    colours = {"good": "#16794A", "fair": ACCENT, "poor": "#A32619"}
+
+    mrows = ""
+    for m in l["metrics"]:
+        col = colours[m["rating"]]
+        core = '<span class="cwv">Core Web Vital</span>' if m["core"] else ""
+        mrows += f"""<div class="mtr">
+          <div class="mtl"><strong>{e(m['name'])}</strong> <span class="ab">{m['abbr']}</span>{core}
+            <p>{e(m['meaning'])}</p></div>
+          <div class="mtv"><span class="mv" style="color:{col}">{e(m['value'])}</span>
+            <span class="mt">target {e(m['target'])}</span></div>
+        </div>"""
+
+    opps = l["opportunities"]
+    orows = "".join(
+        f'<li><strong>{e(o["title"])}</strong>'
+        f'{" — " + e(o["display"]) if o["display"] else ""}'
+        f'<br><span class="why">{e(o["why"])}</span>'
+        f'{"<br><span class=why><em>Fix:</em> " + e(o["fix"]) + "</span>" if o["fix"] else ""}</li>'
+        for o in opps[:10])
+    more = (f'<li class="more">…and {len(opps) - 10} further opportunities in the raw '
+            f'Lighthouse data.</li>' if len(opps) > 10 else "")
+
+    perf = l["scores"]["performance"]
+    a11y = l["scores"]["accessibility"]
+    bp = l["scores"]["best-practices"]
+
+    a11y_cards = "".join(lh_card(i, n) for n, i in enumerate(l["accessibility_issues"], 1))
+    bp_cards = "".join(lh_card(i, n) for n, i in enumerate(l["best_practice_issues"], 1))
+
+    speed = f"""<section class="page">
+  <h2 class="sec">Speed &amp; Core Web Vitals</h2>
+  <p class="lead">Measured by Google Lighthouse in a real Chrome browser on {ff} —
+    the same engine and thresholds Google uses to judge page experience. These are
+    measurements, not estimates.</p>
+
+  <div class="lhhead">{ring(perf, 104)}
+    <div><h3>Performance {perf}/100</h3>
+      <p>{e(verdict_for("performance", perf))} Speed is not a vanity metric: it decides how many people
+      stay long enough to see the offer. Google's own research puts the risk of a
+      visitor leaving at more than 100% higher when load time goes from one second
+      to six.</p>
+      <p class="small">{l['passing']['performance']} performance audits passed.</p></div>
+  </div>
+
+  <h3 style="margin:6mm 0 1mm">What each measurement means</h3>
+  {mrows}
+
+  {'<h3 style="margin:7mm 0 1mm">Biggest speed opportunities</h3>'
+   '<p class="lead">Ordered by the impact Lighthouse measured on this page.</p>'
+   f'<ul class="climit">{orows}{more}</ul>' if opps else
+   '<div class="box" style="margin-top:6mm"><h3>No significant speed opportunities</h3>'
+   '<p style="font-size:9.5pt;color:#4A5261">Lighthouse found nothing material to '
+   'improve on this page.</p></div>'}
+</section>"""
+
+    access = f"""<section class="page">
+  <h2 class="sec">Accessibility</h2>
+  <p class="lead">How usable this site is with a screen reader, a keyboard, or
+    impaired vision — tested against the WCAG guidelines by Lighthouse's automated
+    audit.</p>
+
+  <div class="lhhead">{ring(a11y, 104)}
+    <div><h3>Accessibility {a11y}/100</h3>
+      <p>{e(verdict_for("accessibility", a11y))} Roughly one in six people has a disability affecting how
+      they use the web, and accessibility fixes overwhelmingly improve the experience
+      for everyone else too — bigger tap targets and better contrast help every
+      customer on a phone in the sun.</p>
+      <p class="small">{l['passing']['accessibility']} accessibility audits passed ·
+      {len(l['accessibility_issues'])} failing.</p></div>
+  </div>
+
+  <div class="box"><h3>An honest caveat</h3>
+    <p style="font-size:9.5pt;color:#4A5261">Automated testing catches roughly a
+      third of real accessibility barriers. A clean score here means no machine-detectable
+      failures — it does not prove the site is usable with a screen reader. Anything
+      customer-critical, such as an enquiry or checkout flow, deserves a manual test
+      with real assistive technology.</p></div>
+
+  {'<h3 style="margin:7mm 0 3mm">Accessibility issues</h3>' + a11y_cards if a11y_cards else
+   '<div class="box dark"><h3>No automated failures</h3><p>Lighthouse found no '
+   'machine-detectable accessibility failures on this page. Worth protecting through '
+   'any redesign — accessibility regressions are easy to introduce and easy to miss.</p></div>'}
+
+  {'<h2 class="sec" style="margin-top:9mm">Browser best practices <span class="secn">('
+   + str(len(l['best_practice_issues'])) + ')</span></h2>'
+   f'<p class="lead">Standards compliance, security and correctness, scored '
+   f'{bp}/100 by Lighthouse.</p>' + bp_cards if bp_cards else
+   f'<h2 class="sec" style="margin-top:9mm">Browser best practices</h2>'
+   f'<p class="lead">Scored {bp}/100 with no failing audits.</p>'}
+</section>"""
+
+    return agentic_section(l) + speed + access
+
+
+AGENTIC_STATUS = {
+    "pass": ("Pass", "#16794A"),
+    "partial": ("Partial", "#B8860B"),
+    "fail": ("Fails", "#A32619"),
+    "na": ("Not present", "#6B7280"),
+}
+
+
+def agentic_section(l):
+    """Lighthouse's Agentic Browsing category — can an AI agent actually use this site."""
+    rows = l.get("agentic") or []
+    if not rows:
+        return ""
+    score = l["scores"].get("agentic-browsing")
+    body = ""
+    for a in rows:
+        label, colour = AGENTIC_STATUS[a["status"]]
+        fix = (f'<p class="afix"><em>What to do:</em> {e(a["fix"])}</p>'
+               if a["fix"] and a["status"] != "pass" else "")
+        body += f"""<div class="arow">
+          <div class="ast" style="background:{colour}">{label}</div>
+          <div class="atx"><h4>{e(a['title'])}
+            {'<span class="adisp">' + e(a['display']) + '</span>' if a['display'] else ''}</h4>
+            <p>{e(a['why'])}</p>{fix}</div>
+        </div>"""
+
+    na = [a for a in rows if a["status"] == "na"]
+    na_note = ""
+    if na:
+        na_note = f"""<div class="box"><h3>"Not present" is not a failure — yet</h3>
+        <p style="font-size:9.5pt;color:#4A5261">{len(na)} of these checks look for
+          WebMCP, a very new standard that lets a website publish actions an AI agent
+          can call directly — "get a quote", "book a slot" — instead of the agent
+          guessing its way through the interface. Almost no site has this yet, so it
+          does not count against the score. We flag it because the businesses that
+          adopt it early will be the ones agents can actually transact with.</p></div>"""
+
+    return f"""<section class="page">
+  <h2 class="sec">Agentic browsing</h2>
+  <p class="lead">Lighthouse's newest category, and the one most people have not heard
+    of. It does not ask whether an AI can <em>read</em> the site — that is the AEO and
+    GEO work earlier in this report — but whether an AI agent can <em>operate</em> it:
+    navigate the pages, understand the controls and complete a task on a customer's
+    behalf.</p>
+
+  <div class="lhhead">{ring(score, 104)}
+    <div><h3>Agentic browsing {score if score is not None else '—'}/100</h3>
+      <p>{e(verdict_for("agentic", score))} Assistants are moving from answering questions to
+      completing tasks. A site an agent cannot operate gets skipped in favour of a
+      competitor's that it can — and the customer never learns you were an option.</p>
+      <p class="small">Measured by Lighthouse {e(l['version'])} in Chrome.</p></div>
+  </div>
+
+  {na_note}
+  <h3 style="margin:6mm 0 3mm">What was checked</h3>
+  {body}
+</section>"""
+
+
 def build_html(data, an, client, generated):
     site = urllib.parse.urlparse(data.get("url", "")).netloc or data.get("url", "")
     display = client or site.replace("www.", "")
@@ -335,6 +627,29 @@ def build_html(data, an, client, generated):
     for i in an["quick_wins"]:
         qw += (f'<li><strong>{e(i["title"])}</strong> — {e(i["fix"])}</li>')
     qw = qw or "<li>No quick wins outstanding — the low-effort fundamentals are already in place.</li>"
+
+    # Lighthouse strip on the cover
+    l = an.get("lh")
+    health_strip = ""
+    if l:
+        chips = ""
+        for key in ("performance", "accessibility", "best-practices", "agentic-browsing"):
+            sc = l["scores"].get(key)
+            if sc is None:
+                continue
+            col = {"good": "#3FA776", "fair": "#E0762F", "poor": "#D4553F",
+                   "na": "#8B93A5"}[band(sc)]
+            chips += (f'<div class="hchip"><span class="hs" style="color:{col}">{sc}</span>'
+                      f'<span class="hl">{LH_LABEL.get(key, key)}</span></div>')
+        ff = "mobile" if l["form_factor"] == "mobile" else "desktop"
+        health_strip = (f'<div class="hrow">{chips}</div>'
+                        f'<p class="hnote">Measured in Chrome by Google Lighthouse '
+                        f'{e(l["version"])} · {ff} test</p>')
+    lh_credit = (f"Performance, accessibility, best-practice and agentic-browsing "
+                 f"figures are real measurements taken in Chrome by Google Lighthouse "
+                 f"{e(l['version'])} ({e(l['form_factor'])} test with standard "
+                 f"throttling); scores vary between runs and network conditions. "
+                 if l else "")
 
     # platform constraints
     pf = an["platform"]
@@ -544,6 +859,42 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
   text-transform:uppercase;color:{ACCENT};margin-bottom:1.2mm}}
 .blk p{{font-size:9pt;color:#3A4150;line-height:1.5}}
 
+/* lighthouse */
+.lhhead{{display:flex;gap:6mm;align-items:center;margin:4mm 0 2mm;
+  padding-bottom:4mm;border-bottom:1px solid #EAE7E2}}
+.lhhead h3{{margin-bottom:1.5mm}}
+.lhhead p{{font-size:9.5pt;color:#3A4150;line-height:1.5}}
+.lhhead .small{{font-size:8.5pt;color:#6B7280;margin-top:1.5mm}}
+.mtr{{display:flex;gap:5mm;align-items:center;padding:3mm 0;
+  border-bottom:1px solid #EFECE7;page-break-inside:avoid}}
+.mtl{{flex:1}}
+.mtl strong{{font-size:10pt}}
+.ab{{font-size:8pt;color:#6B7280;background:#F2EFEA;padding:.4mm 1.6mm;
+  border-radius:1mm;margin-left:1.5mm}}
+.cwv{{font-size:7pt;font-weight:650;letter-spacing:.06em;text-transform:uppercase;
+  color:#fff;background:{ACCENT};padding:.6mm 1.8mm;border-radius:1mm;margin-left:1.5mm}}
+.mtl p{{font-size:8.5pt;color:#5A616F;margin-top:.8mm;line-height:1.45}}
+.mtv{{width:30mm;text-align:right}}
+.mv{{display:block;font-size:14pt;font-weight:700;letter-spacing:-.02em}}
+.mt{{display:block;font-size:7.5pt;color:#98A2B3}}
+.arow{{display:flex;gap:4mm;padding:3.5mm 0;border-bottom:1px solid #EFECE7;
+  page-break-inside:avoid}}
+.ast{{width:22mm;flex-shrink:0;color:#fff;font-size:7.5pt;font-weight:650;
+  letter-spacing:.05em;text-transform:uppercase;text-align:center;
+  padding:1.4mm 0;border-radius:1.2mm;height:fit-content}}
+.atx{{flex:1}}
+.atx h4{{font-size:10.5pt;font-weight:650}}
+.adisp{{font-size:8.5pt;color:{ACCENT};font-weight:600;margin-left:2mm}}
+.atx p{{font-size:9pt;color:#3A4150;margin-top:1mm;line-height:1.5}}
+.afix{{font-size:8.5pt;color:#5A616F;margin-top:1.2mm}}
+.afix em{{color:{ACCENT};font-style:normal;font-weight:650}}
+.hrow{{display:flex;gap:3mm;margin-top:4mm}}
+.hchip{{flex:1;background:#141A29;border-radius:2mm;padding:3.5mm 3mm;text-align:center}}
+.hchip .hs{{display:block;font-size:19pt;font-weight:700;letter-spacing:-.03em;line-height:1}}
+.hchip .hl{{display:block;font-size:7.5pt;color:#8B93A5;margin-top:1.2mm;
+  letter-spacing:.06em;text-transform:uppercase}}
+.hnote{{font-size:7.5pt;color:#8B93A5;margin-top:2.5mm;text-align:center}}
+
 /* platform */
 .ptwo{{display:flex;gap:4mm;margin-top:4mm}}
 .pgood,.pwall{{flex:1;border:1px solid #E4E0DA;border-radius:2.5mm;padding:5mm}}
@@ -582,6 +933,12 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 .wlist li::before{{content:'';position:absolute;left:0;top:1.6mm;width:2.2mm;height:2.2mm;
   border-radius:50%;background:#16794A}}
 
+/* glossary */
+.gloss{{columns:2;column-gap:7mm}}
+.grow{{break-inside:avoid;padding:.8mm 0;border-bottom:1px solid #F2EFEA}}
+.gloss dt{{font-size:8.5pt;font-weight:650;color:{INK}}}
+.gloss dd{{font-size:8pt;color:#5A616F;line-height:1.34;margin-top:.2mm}}
+
 /* cta */
 .cta{{background:{INK};color:#fff;border-radius:3mm;padding:9mm;margin-top:6mm}}
 .cta h2{{font-size:22pt;font-weight:700;letter-spacing:-.03em;margin-bottom:3mm}}
@@ -618,6 +975,7 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
   </div>
 
   <div class="scards">{cards}</div>
+  {health_strip}
 
   <div class="cfoot"><span>Prepared by Boldpiq &middot; boldpiq.com</span>
     <span>{e(generated.strftime('%d %B %Y'))}</span></div>
@@ -679,6 +1037,8 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
   </div>
 </section>
 
+{lh_sections(l)}
+
 {platform_section}
 
 {sections}
@@ -689,6 +1049,8 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     and are worth protecting during any future redesign or migration.</p>
   {working}
 </section>
+
+{glossary_section()}
 
 <section class="page">
   <div class="cta">
@@ -716,8 +1078,8 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     {e(data.get('url',''))}. Scores reflect the page as published at the time of
     scanning and will change as the site changes. Automated checks cover technical and
     structural factors; they do not replace a manual review of content quality,
-    commercial positioning or legal compliance. Scan engine: seoscore.tools.
-    Analysis, prioritisation and recommendations: Boldpiq.</p>
+    commercial positioning or legal compliance. {lh_credit}Structural scan engine:
+    seoscore.tools. Analysis, prioritisation and recommendations: Boldpiq.</p>
 </section>"""
 
 
@@ -758,7 +1120,15 @@ def main():
     ap.add_argument("--keep-html", action="store_true", help="keep the intermediate HTML")
     ap.add_argument("--open", dest="open_pdf", action="store_true", help="open the PDF when done")
     ap.add_argument("--from-json", help="render from a saved scan JSON instead of scanning")
+    ap.add_argument("--no-lighthouse", action="store_true",
+                    help="skip the Chrome Lighthouse run (faster, less complete)")
+    ap.add_argument("--desktop", action="store_true",
+                    help="run Lighthouse as desktop instead of mobile")
     a = ap.parse_args()
+
+    if not a.no_lighthouse and not lh.available()[0]:
+        print("   note: Lighthouse not found — continuing without speed, accessibility "
+              "and agentic sections", file=sys.stderr)
 
     os.makedirs(a.out, exist_ok=True)
     made = []
@@ -776,6 +1146,15 @@ def main():
             data = scan(url, a.keyphrase)
 
         an = analyse(data)
+
+        an["lh"] = None
+        if not a.no_lighthouse:
+            print("   measuring in Chrome (Lighthouse) …")
+            an["lh"] = lh.run(url, "desktop" if a.desktop else "mobile")
+            if an["lh"] is None:
+                print("   Lighthouse did not complete — continuing without it",
+                      file=sys.stderr)
+
         generated = dt.datetime.now()
         stamp = generated.strftime("%Y-%m-%d")
         base = os.path.join(a.out, f"{slug(url)}-visibility-report-{stamp}")
@@ -801,6 +1180,12 @@ def main():
         print(f"   {len(an['issues'])} issues "
               f"({c['critical']} critical, {c['high']} high, "
               f"{c['medium']} medium, {c['low']} low)")
+        if an["lh"]:
+            s = an["lh"]["scores"]
+            print(f"   lighthouse · perf {s.get('performance')} · "
+                  f"a11y {s.get('accessibility')} · "
+                  f"best-practice {s.get('best-practices')} · "
+                  f"agentic {s.get('agentic-browsing')}")
         print(f"   {pdf_path}")
         made.append(pdf_path)
 

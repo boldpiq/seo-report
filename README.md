@@ -6,12 +6,18 @@ Where `site-audit` measures launch readiness for sites *we* build, this is the
 **sales and diagnostic asset for sites we did not build**: a prospect's existing
 website, audited and explained in language a business owner can act on.
 
-Scores the site on three pillars:
+Scores the site on seven measured dimensions — three from a structural scan of the
+HTML, four measured live in Chrome by Google Lighthouse:
 
-- **SEO** — how well Google and Bing can find, understand and rank it
-- **AEO** — how easily AI assistants can read it and quote it in an answer
-- **GEO** — how likely it is to be *recommended* by ChatGPT, Perplexity, Claude
-  and Google's AI Overviews
+| From the structural scan | Measured in Chrome (Lighthouse) |
+|---|---|
+| **SEO** — can Google find, understand and rank it | **Performance** — real load speed on a throttled mobile connection |
+| **AEO** — can AI assistants read it and quote it | **Accessibility** — screen reader, keyboard and low-vision usability |
+| **GEO** — will AI *recommend* it by name | **Best practices** — security and standards compliance |
+| | **Agentic browsing** — can an AI agent actually *operate* the site |
+
+Everything in the report is a real measurement of the live page. Nothing is
+estimated, inferred or padded.
 
 ## Use
 
@@ -30,24 +36,35 @@ reports/clientdomain-co-za-visibility-report-2026-08-03.pdf
 reports/clientdomain-co-za-visibility-report-2026-08-03.json
 ```
 
+Takes about 40 seconds per site, most of it Lighthouse.
+
 Useful flags: `--out DIR`, `--keep-html` (debug the layout), `--open`,
-`--from-json FILE` (re-render an old scan without re-scanning).
+`--from-json FILE` (re-render an old scan without re-scanning), `--desktop`
+(Lighthouse desktop instead of mobile), `--no-lighthouse` (skip the Chrome run —
+about 30s faster, drops four sections).
 
 ## What's in the report
 
+~22 pages, in this order:
+
 | Page | Content |
 |---|---|
-| Cover | Overall score, the three pillar scores, issue count |
+| Cover | Overall visibility score, the three pillar scores, the four Lighthouse scores |
 | What we measured | Each pillar explained, scored and given a plain verdict |
-| Where to start | Issues graded critical → low, quick wins, our recommended order |
-| AI assistant readiness | Per-platform scores: ChatGPT, Perplexity, Claude, Google AI Overviews |
+| Where to start | Issues graded critical → low, quick wins, our recommended order of work |
+| AI assistant readiness | Per-platform: ChatGPT, Perplexity, Claude, Google AI Overviews |
+| Agentic browsing | Whether an AI agent can operate the site, including WebMCP |
+| Speed & Core Web Vitals | LCP, FCP, TBT, CLS, SI, TTI each explained, plus ranked speed opportunities |
+| Accessibility | WCAG audit with an honest note on what automated testing cannot catch, then browser best practices |
 | Platform & architecture | What their stack can and **cannot** do (see below) |
 | SEO / AEO / GEO Issues | **Every** issue, each with the finding, why it matters commercially, and how it gets fixed |
 | What's already working | Passing checks — worth protecting in a redesign |
+| Plain English glossary | Every term in the report, one line each |
 | Next steps | Boldpiq CTA |
 
 Issue counts match the scanner's own UI exactly (an issue is a failing check that
-is applicable and not merely informational).
+is applicable and not merely informational). Nothing is written for a technical
+reader: every term is explained where it appears and again in the glossary.
 
 ## Platform & architecture constraints
 
@@ -69,14 +86,22 @@ platform is not detected.
 ## How it works
 
 ```
-URL → seoscore.tools/api/scan (free, no key) → JSON
-    → checks.py    Boldpiq's explanation for all 219 checks (why + fix + priority)
-    → platforms.py what this stack can and cannot do
-    → branded HTML (Geist, brand colours pulled from boldpiq.com)
-    → headless Chrome → PDF
+URL ─┬→ seoscore.tools/api/scan (free, no key) ──→ structural JSON
+     └→ Google Lighthouse in real Chrome ───────→ measured JSON
+        → checks.py     Boldpiq's explanation for all 219 structural checks
+        → lighthouse.py Boldpiq's explanation for the Lighthouse audits
+        → platforms.py  what this stack can and cannot do
+        → branded HTML (Geist + brand colours, both taken from boldpiq.com)
+        → headless Chrome → PDF
 ```
 
-**Requirements:** Python 3 (stdlib only) and Google Chrome. Nothing to install.
+**Requirements:** Python 3 (stdlib only), Google Chrome, and Node with Lighthouse
+13+ — reused from `~/boldpiq-tools/site-audit/node_modules`, so there is only one
+copy on the machine. Without Node the report still generates, minus the four
+Lighthouse sections.
+
+Agentic browsing needs Lighthouse 13 or newer (`npm install lighthouse@latest` in
+site-audit). On older versions that section is simply absent.
 
 The scan engine is the free public tool at seoscore.tools, credited in the report
 footer. Their terms ask that automated scripts not run excessive scans, so the
@@ -90,8 +115,12 @@ Priorities, explanations, platform analysis and the report itself are Boldpiq's 
 - `checks.py` — the explanation library, keyed by check ID:
   `id: (Title, priority, effort, why_it_matters, how_to_fix)`. Unknown IDs fall
   back to the scanner's own wording, so a new check never leaves a blank.
+- `lighthouse.py` — the Lighthouse runner plus `NOTES`, our explanations for its
+  audits. Unknown audits fall back to Lighthouse's own description (Apache 2.0,
+  credited in the report footer). `METRICS` holds the Core Web Vitals thresholds.
 - `platforms.py` — per-platform blocked/limited findings and the narrative text.
-- `seo_report.py` — layout, brand colours (`INK`, `ACCENT`) and page structure.
+- `seo_report.py` — layout, brand colours (`INK`, `ACCENT`), `GLOSSARY`, verdict
+  wording and page structure.
 
 Re-render without burning a scan while editing:
 
