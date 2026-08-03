@@ -61,9 +61,17 @@ Do not remove the cap to make it fit.
 Same pattern as n8n. Two pieces: a Tunnel to reach it, and an Access policy to
 decide who may.
 
-1. **Tunnel** — add a public hostname to the existing `cloudflared` config
-   (e.g. `audit.boldpiq.com` → `http://localhost:8090`), or add a service to the
-   existing tunnel container. No firewall port needs opening; the tunnel dials out.
+1. **Tunnel** — the `cloudflared` container on this box is **token-managed**, so
+   its routes live in the Cloudflare dashboard, not in a file on the server.
+   There is nothing to edit over SSH.
+
+   Zero Trust → Networks → Tunnels → (the existing tunnel) → Public Hostname → Add:
+   - Subdomain: `audit`  ·  Domain: `boldpiq.com`
+   - Service: `HTTP`  →  `boldpiq-audit:8090`
+
+   The audit container is attached to the `n8n_tunnel` network, so cloudflared
+   resolves it by container name. Verified reachable at that exact URL from
+   inside the network. No firewall port needs opening; the tunnel dials out.
 
 2. **Access policy** — Cloudflare Zero Trust → Access → Applications → Add:
    - Type: Self-hosted
