@@ -1105,10 +1105,14 @@ def render_pdf(html_path, pdf_path):
                          "or set BOLDPIQ_CHROME to the browser executable.")
     cmd = [chrome] + runtime.CHROME_FLAGS + [
            "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
-           "--virtual-time-budget=10000",
+           # 10s was enough on a fast desktop but not in the container, where the
+           # budget expired mid-render and Chrome printed a partial document — the
+           # Lighthouse charts were the sections that lost the race. Env-tunable.
+           "--virtual-time-budget=" + os.environ.get("BOLDPIQ_VTB", "45000"),
            f"--print-to-pdf={pdf_path}",
            urllib.parse.urljoin("file:", urllib.request.pathname2url(html_path))]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       timeout=int(os.environ.get("BOLDPIQ_PDF_TIMEOUT", "180")))
     if not os.path.exists(pdf_path):
         raise SystemExit(f"Chrome failed to produce a PDF:\n{r.stderr[-600:]}")
 
@@ -1170,8 +1174,8 @@ def main():
             print("   measuring in Chrome (Lighthouse) …")
             an["lh"] = lh.run(url, "desktop" if a.desktop else "mobile")
             if an["lh"] is None:
-                print("   Lighthouse did not complete — continuing without it",
-                      file=sys.stderr)
+                print(f"   Lighthouse did not complete after {lh.ATTEMPTS} attempts "
+                      f"({lh.last_error}) — continuing without it", file=sys.stderr)
 
         generated = dt.datetime.now()
         stamp = generated.strftime("%Y-%m-%d")

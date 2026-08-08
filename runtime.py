@@ -47,8 +47,20 @@ CHROME_CANDIDATES = {
 # Chrome refuses to run as root without this, which is exactly what happens
 # inside a container. Harmless everywhere else — we only ever load local files
 # and pages we are deliberately auditing.
-CHROME_FLAGS = ["--headless", "--disable-gpu", "--no-sandbox",
-                "--disable-dev-shm-usage"]
+#
+# --disable-software-rasterizer is load-bearing, not tidying. With --disable-gpu
+# alone Chrome falls back to SwiftShader and renders WebGL on the CPU; a site
+# with a continuous canvas animation (boldpiq.com's own 3D hero, for one) then
+# pins the main thread until Lighthouse gives up with PAGE_HUNG. That failure was
+# 100% reproducible in the container and invisible in the report, because
+# Lighthouse still exits 0 and writes a JSON full of nulls.
+# The backgrounding flags stop Chrome throttling the tab it is measuring when it
+# decides the headless window is not visible.
+CHROME_FLAGS = ["--headless=new", "--disable-gpu", "--no-sandbox",
+                "--disable-dev-shm-usage", "--disable-software-rasterizer",
+                "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-extensions", "--mute-audio"]
 
 
 def find_chrome():

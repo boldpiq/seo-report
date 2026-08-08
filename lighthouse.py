@@ -20,10 +20,15 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 
 import runtime
 
 HOME = os.path.expanduser("~")
+
+# Why the most recent run() failed, or None. Set by run(); read by callers that
+# want to tell the user what happened instead of silently omitting the section.
+last_error = None
 
 CATEGORIES = ["performance", "accessibility", "best-practices", "seo",
               "agentic-browsing"]
@@ -513,21 +518,18 @@ def available():
     return (binary, _node_dir()) if binary and _node_dir() else (None, None)
 
 
-def run(url, form_factor="mobile", timeout=180):
-    """Run Lighthouse. Returns parsed results, or None if it cannot run."""
-    binary, node_dir = available()
-    if not binary:
-        return None
+ATTEMPTS = 3
 
-    env = dict(os.environ)
-    env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
-    # Point Lighthouse at whichever Chromium we found. Without this it hunts for
-    # its own, which fails in the container and picks the wrong browser on a
-    # machine with both Chrome and Edge installed.
-    chrome = runtime.find_chrome()
-    if chrome:
-        env["CHROME_PATH"] = chrome
 
+def _run_once(url, form_factor, timeout, env, binary, node_dir):
+    """One Lighthouse invocation. Returns (parsed, error_code).
+
+    Lighthouse does NOT signal a failed measurement through its exit code: on
+    PAGE_HUNG/NO_FCP it exits 0 and writes a full-looking report whose category
+    scores are all null. Trusting the exit code is what made a broken run render
+    as an empty section instead of an error. The report's own runtimeError is the
+    only honest signal, so that is what we check.
+    """
     out = os.path.join(tempfile.mkdtemp(prefix="bp-lh-"), "lh.json")
     # A .js entrypoint (global npm install) has no shebang we can rely on.
     launcher = [os.path.join(node_dir, "node"), binary] if binary.endswith(".js") else [binary]
@@ -541,16 +543,72 @@ def run(url, form_factor="mobile", timeout=180):
     try:
         subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return None
-    if not os.path.exists(out):
-        return None
+        shutil.rmtree(os.path.dirname(out), ignore_errors=True)
+        return None, "TIMEOUT"
     try:
+        if not os.path.exists(out):
+            return None, "NO_OUTPUT"
         with open(out) as f:
-            return parse(json.load(f))
+            raw = json.load(f)
+        err = raw.get("runtimeError") or {}
+        if err.get("code") and err.get("code") != "NO_ERROR":
+            return None, err["code"]
+        parsed = parse(raw)
+        # Belt and braces: a report with no category scored is not a measurement.
+        if not any(v is not None for v in parsed.get("scores", {}).values()):
+            return None, "NO_SCORES"
+        return parsed, None
     except (ValueError, KeyError):
-        return None
+        return None, "UNPARSEABLE"
     finally:
         shutil.rmtree(os.path.dirname(out), ignore_errors=True)
+
+
+def run(url, form_factor="mobile", timeout=180):
+    """Run Lighthouse, retrying a failed measurement.
+
+    Returns parsed results, or None if every attempt failed. `last_error` on the
+    module records why, so callers can say what went wrong instead of quietly
+    dropping the whole section.
+    """
+    global last_error
+    last_error = None
+    binary, node_dir = available()
+    if not binary:
+        last_error = "NOT_INSTALLED"
+        return None
+
+    env = dict(os.environ)
+    env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+    # Point Lighthouse at whichever Chromium we found. Without this it hunts for
+    # its own, which fails in the container and picks the wrong browser on a
+    # machine with both Chrome and Edge installed.
+    chrome = runtime.find_chrome()
+    if chrome:
+        env["CHROME_PATH"] = chrome
+
+    # An occasional run comes back with one category unscored — not a hang, just
+    # that category failing to compute. Retry for a complete set, but never throw
+    # away a partial result: a report missing one score beats no report at all.
+    best, best_scored = None, -1
+    for attempt in range(1, ATTEMPTS + 1):
+        parsed, err = _run_once(url, form_factor, timeout, env, binary, node_dir)
+        if parsed is not None:
+            scores = parsed.get("scores", {})
+            scored = sum(1 for v in scores.values() if v is not None)
+            if scored > best_scored:
+                best, best_scored = parsed, scored
+            if scored == len(CATEGORIES):
+                last_error = None
+                return parsed
+            last_error = "PARTIAL_SCORES"
+        else:
+            last_error = err
+        if attempt < ATTEMPTS:
+            # A hung renderer is usually transient once the flags are right;
+            # give the box a moment rather than hammering it back to back.
+            time.sleep(5)
+    return best
 
 
 def _explain(audit_id, audit):
