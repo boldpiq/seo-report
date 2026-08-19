@@ -28,6 +28,11 @@ Uses the Chrome and Lighthouse already on the machine. `PORT=8091` to change por
 
 ## Deploy on the Hetzner box
 
+> **Reality check:** `/opt/seo-report` on `boldpiq-hz` is **not** a git checkout —
+> it was copied up with `scp`/`rsync` and the files are owned by uid 501. To ship a
+> change, copy the changed file(s) up and rebuild; `git pull` there will fail.
+> `scp seo_report.py boldpiq-hz:/opt/seo-report/` then the rebuild below.
+
 ```bash
 ssh <box>
 git clone git@github-boldpiq:boldpiq/seo-report.git /opt/seo-report
