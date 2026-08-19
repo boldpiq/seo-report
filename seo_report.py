@@ -30,6 +30,7 @@ import urllib.parse
 import urllib.request
 
 from checks import CHECKS
+import fixpack
 import platforms as plat
 import lighthouse as lh
 import runtime
@@ -1286,6 +1287,16 @@ def main():
 
         with open(base + ".json", "w") as f:
             json.dump(data, f, indent=1)
+
+        # Companion fix pack: the same findings, compressed for pasting into an AI.
+        # Written here rather than derived later so it always reflects the run that
+        # produced the PDF — including the Lighthouse sections, which the raw scan
+        # JSON does not carry.
+        try:
+            with open(base + "-fixes.json", "w") as f:
+                json.dump(fixpack.build(data, an, a.client, generated), f, indent=1)
+        except Exception as err:                    # never lose a PDF over this
+            print(f"   fix pack not written ({err})", file=sys.stderr)
 
         html_path = base + ".html"
         with open(html_path, "w") as f:

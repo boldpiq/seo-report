@@ -30,7 +30,7 @@ ENV BOLDPIQ_CHROME=/usr/bin/chromium \
     HOST=0.0.0.0
 
 WORKDIR /app
-COPY checks.py lighthouse.py platforms.py runtime.py seo_report.py ./
+COPY checks.py fixpack.py lighthouse.py platforms.py runtime.py seo_report.py ./
 COPY assets/ ./assets/
 COPY webapp/ ./webapp/
 

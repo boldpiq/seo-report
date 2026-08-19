@@ -29,14 +29,32 @@ cd ~/boldpiq-tools/seo-report
 ./seo-report.sh clientdomain.co.za --keyphrase "roof repairs cape town"
 ```
 
-PDF and the raw scan JSON land in `reports/`:
+PDF, the raw scan JSON and the fix pack land in `reports/`:
 
 ```
 reports/clientdomain-co-za-visibility-report-2026-08-03.pdf
 reports/clientdomain-co-za-visibility-report-2026-08-03.json
+reports/clientdomain-co-za-visibility-report-2026-08-03-fixes.json
 ```
 
 Takes about 40 seconds per site, most of it Lighthouse.
+
+## Fix list for AI
+
+The PDF is written for the client. The **fix pack** (`-fixes.json`, and the
+`/fixes/<report>.pdf` page in the web app) is the same recommendations rewritten
+for a machine: one markdown block, section headings included, that pastes
+straight into ChatGPT, Claude or an editor.
+
+- **One button copies everything.** Sections are headings inside the copied text,
+  not separate copies — per-section buttons are there as a convenience only.
+- Platform-blocked items are copied too, tagged `⚠ Not fixable on this platform`,
+  so an assistant does not invent a workaround for something Wix will never allow.
+- Reports generated before this existed still get a fix list — rebuilt from the
+  saved scan JSON, minus the Lighthouse sections, which that file never held.
+
+Wording lives in `fixpack.py`, generated once server-side so the copy button, the
+JSON and anything built on top of them can never drift apart.
 
 Useful flags: `--out DIR`, `--keep-html` (debug the layout), `--open`,
 `--from-json FILE` (re-render an old scan without re-scanning), `--desktop`

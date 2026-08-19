@@ -20,6 +20,7 @@ Design notes worth keeping:
   single source of truth for how a report is built.
 """
 
+import datetime as dt
 import json
 import mimetypes
 import os
@@ -258,13 +259,55 @@ def _recent_reports(limit=25):
             stat = os.stat(path)
         except OSError:
             continue
+        base = os.path.join(REPORTS, name[:-4])
         out.append({"file": name,
                     "site": name.split("-visibility-report-")[0],
                     "url": _report_url(name, stat.st_mtime),
+                    "fixes": os.path.isfile(base + "-fixes.json")
+                             or os.path.isfile(base + ".json"),
                     "size_kb": round(stat.st_size / 1024),
                     "modified": stat.st_mtime})
     out.sort(key=lambda r: r["modified"], reverse=True)
     return out[:limit]
+
+
+# ── fix packs ────────────────────────────────────────────────────────────────
+# The PDF is for the client; the fix pack is the same findings compressed for
+# pasting into an AI. seo_report.py writes one next to every new report. Older
+# reports predate that, so we rebuild theirs on the fly from the scan JSON —
+# without the Lighthouse sections, which the scan JSON does not carry.
+
+def _fixpack_for(pdf_name):
+    """(pack, error). Reads the companion file, else derives one from the scan JSON."""
+    if not pdf_name.lower().endswith(".pdf"):
+        return None, "Report not found."
+    base = os.path.join(REPORTS, pdf_name[:-4])
+
+    side = base + "-fixes.json"
+    if os.path.isfile(side):
+        try:
+            with open(side, "r", encoding="utf-8") as fh:
+                return json.load(fh), None
+        except (OSError, ValueError):
+            pass                       # fall through and rebuild it
+
+    scan_json = base + ".json"
+    if not os.path.isfile(scan_json):
+        return None, ("No scan data was kept for this report, so the fix list "
+                      "cannot be rebuilt. Re-run the audit.")
+    try:
+        with open(scan_json, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        import seo_report                      # local: never break the server on import
+        import fixpack
+        an = seo_report.analyse(data)
+        an["lh"] = None                        # not re-measurable from saved data
+        stamp = dt.datetime.fromtimestamp(os.stat(scan_json).st_mtime)
+        pack = fixpack.build(data, an, None, stamp)
+        pack["derived"] = True
+        return pack, None
+    except Exception as err:
+        return None, f"Could not build the fix list: {err}"
 
 
 # ── http ─────────────────────────────────────────────────────────────────────
@@ -322,6 +365,20 @@ class Handler(BaseHTTPRequestHandler):
                 "queued": _queue.qsize(),
             })
 
+        if path.startswith("/fixes/"):
+            return self._file(os.path.join(HERE, "static", "fixes.html"),
+                              "text/html; charset=utf-8")
+
+        if path.startswith("/api/fixes/"):
+            name = os.path.basename(urllib.parse.unquote(path[len("/api/fixes/"):]))
+            known = {r["file"] for r in _recent_reports(limit=10_000)}
+            if name not in known:
+                return self._send(404, {"error": "Report not found."})
+            pack, err = _fixpack_for(name)
+            if err:
+                return self._send(404, {"error": err})
+            return self._send(200, pack)
+
         if path == "/api/reports":
             return self._send(200, {"reports": _recent_reports()})
 
@@ -360,7 +417,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "That report no longer exists."})
 
         removed = []
-        for candidate in (name, name[:-4] + ".json" if name.lower().endswith(".pdf") else None):
+        stem = name[:-4] if name.lower().endswith(".pdf") else None
+        for candidate in (name, stem + ".json" if stem else None,
+                          stem + "-fixes.json" if stem else None):
             if not candidate:
                 continue
             target = os.path.join(REPORTS, candidate)

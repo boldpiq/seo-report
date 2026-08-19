@@ -28,6 +28,10 @@ Uses the Chrome and Lighthouse already on the machine. `PORT=8091` to change por
 
 ## Deploy on the Hetzner box
 
+> **Shipping a change:** the file list the image copies is explicit in the
+> `Dockerfile` — a new module (like `fixpack.py`) must be added there or it simply
+> will not exist in the container.
+
 > **Reality check:** `/opt/seo-report` on `boldpiq-hz` is **not** a git checkout —
 > it was copied up with `scp`/`rsync` and the files are owned by uid 501. To ship a
 > change, copy the changed file(s) up and rebuild; `git pull` there will fail.

@@ -88,6 +88,9 @@
     font-weight:700;text-decoration:none;cursor:pointer;border:1px solid var(--border);
     background:transparent;color:var(--paper);font-family:inherit}
   .btn.primary{background:var(--accent);border-color:var(--accent)}
+  .rep .dl.fixes{color:var(--muted-dim)}
+  .rep .dl.fixes:hover{color:var(--accent)}
+  .donehint{font-size:12.5px;color:var(--muted-dim);margin:10px 0 0}
   .btn:hover{filter:brightness(1.12)}
 
   .error{border:1px solid rgba(248,81,73,.4);background:rgba(248,81,73,.09);
@@ -235,6 +238,7 @@ async function loadRecent(){
         <span class="who"><span class="site">${r.site}</span><span class="meta">${when} · ${r.size_kb} KB</span></span>
         <span class="acts">
           <a class="dl" href="/download/${f}" target="_blank" rel="noopener">Open ↗</a>
+          ${r.fixes ? `<a class="dl fixes" href="/fixes/${f}" target="_blank" rel="noopener">Fixes ↗</a>` : ""}
           ${r.url ? `<button class="redo" type="button" data-url="${escapeHtml(r.url)}" aria-label="Run the audit again for ${r.site}">Redo</button>` : ""}
           <button class="del" type="button" data-file="${f}" data-site="${r.site}" aria-label="Delete report for ${r.site}">Delete</button>
         </span>
@@ -288,11 +292,15 @@ function finish(job){
 
   $("msg").textContent = "Report ready.";
   const href = "/download/" + encodeURIComponent(job.pdf);
+  const fixes = "/fixes/" + encodeURIComponent(job.pdf);
   $("result").innerHTML = `<div class="done">
       <a class="btn primary" href="${href}" target="_blank" rel="noopener">Open the report</a>
       <a class="btn" href="${href}" download>Download PDF</a>
       <button class="btn" type="button" onclick="reset()">Audit another site</button>
-    </div>`;
+      <a class="btn" href="${fixes}" target="_blank" rel="noopener">Fix list for AI ↗</a>
+    </div>
+    <p class="donehint">The fix list opens in a new tab: every recommendation in one
+      copyable block, grouped by section, written for pasting into an AI.</p>`;
   loadRecent();
 }
 

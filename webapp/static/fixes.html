@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Fix list — Boldpiq Audit</title>
+<style>
+  :root{
+    --ink:#0B0F1C; --accent:#C4541A; --paper:#fff;
+    --surface:rgba(255,255,255,.04); --border:rgba(255,255,255,.10);
+    --muted:rgba(255,255,255,.60); --muted-dim:rgba(255,255,255,.38);
+    --ok:#3FB950; --warn:#D29922; --bad:#F85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--paper);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .glow{position:fixed;inset:-200px;pointer-events:none;z-index:0;
+    background:radial-gradient(ellipse 46% 40% at 18% 12%,rgba(196,84,26,.24) 0%,transparent 65%),
+               radial-gradient(ellipse 34% 30% at 86% 78%,rgba(196,84,26,.12) 0%,transparent 60%)}
+  .wrap{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:44px 22px 96px}
+
+  .eyebrow{display:flex;gap:14px;align-items:center;margin-bottom:18px}
+  .eyebrow i{display:block;width:32px;height:1px;background:var(--accent)}
+  .eyebrow span{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  h1{font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:-.035em;line-height:1.05;margin:0 0 10px}
+  h1 em{font-style:normal;color:var(--accent)}
+  .lede{color:var(--muted);max-width:64ch;margin:0 0 22px}
+  .meta{font-size:13px;color:var(--muted-dim);margin:0 0 22px}
+  .meta a{color:var(--accent);text-decoration:none}
+
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 26px}
+  .chip{border:1px solid var(--border);border-radius:99px;padding:5px 12px;font-size:12.5px;
+    color:var(--muted);background:var(--surface);font-variant-numeric:tabular-nums}
+  .chip b{color:var(--paper);font-weight:700}
+  .chip.crit b{color:#FF8B84} .chip.high b{color:#F0A64B}
+
+  /* sticky copy bar */
+  .bar{position:sticky;top:0;z-index:5;margin:0 0 26px;padding:14px 0;
+    background:linear-gradient(var(--ink) 72%,transparent);
+    display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:11px;
+    font-size:14px;font-weight:700;text-decoration:none;cursor:pointer;
+    border:1px solid var(--border);background:transparent;color:var(--paper);
+    font-family:inherit;transition:filter .15s,border-color .15s}
+  .btn.primary{background:var(--accent);border-color:var(--accent)}
+  .btn:hover{filter:brightness(1.14)}
+  .btn.small{padding:7px 13px;font-size:12.5px;font-weight:700;color:var(--muted)}
+  .btn.small:hover{color:var(--paper);border-color:rgba(196,84,26,.6)}
+  .barnote{font-size:12.5px;color:var(--muted-dim)}
+
+  section.sec{border:1px solid var(--border);border-radius:18px;background:var(--surface);
+    padding:22px 22px 8px;margin-bottom:18px;position:relative;overflow:hidden}
+  section.sec::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;
+    background:linear-gradient(90deg,var(--accent),transparent 60%)}
+  .sechead{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;justify-content:space-between}
+  .sechead h2{font-size:19px;font-weight:800;letter-spacing:-.02em;margin:0}
+  .sechead .n{font-size:12px;color:var(--muted-dim);font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase}
+  .blurb{font-size:13.5px;color:var(--muted);margin:8px 0 0;max-width:70ch}
+
+  .hi{list-style:none;padding:0;margin:16px 0 0}
+  .hi li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;padding:7px 0;
+    border-top:1px solid rgba(255,255,255,.06)}
+  .hi li:first-child{border-top:0}
+  .hi .p{flex:none;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    border-radius:5px;padding:3px 7px;margin-top:2px;background:rgba(255,255,255,.08);color:var(--muted)}
+  .hi .p.critical{background:rgba(248,81,73,.16);color:#FF8B84}
+  .hi .p.high{background:rgba(240,166,75,.16);color:#F0A64B}
+  .hi .t{min-width:0}
+  .hi .t b{font-weight:650}
+  .hi .t span{display:block;font-size:13px;color:var(--muted);margin-top:2px}
+  .hi .t .warn{color:#F0A64B}
+
+  details.raw{margin:14px 0 18px;border-top:1px solid var(--border);padding-top:12px}
+  details.raw summary{cursor:pointer;font-size:12.5px;color:var(--muted);list-style:none;user-select:none}
+  details.raw summary::-webkit-details-marker{display:none}
+  details.raw summary::before{content:"▸ ";color:var(--accent)}
+  details.raw[open] summary::before{content:"▾ "}
+  pre.md{white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.32);
+    border:1px solid var(--border);border-radius:12px;padding:16px;margin:12px 0 0;
+    font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);
+    max-height:420px;overflow:auto}
+  .secfoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
+
+  .note{border:1px solid rgba(210,153,34,.35);background:rgba(210,153,34,.08);
+    border-radius:12px;padding:13px 16px;font-size:13.5px;color:#E9C46A;margin:0 0 22px}
+  .error{border:1px solid rgba(248,81,73,.4);background:rgba(248,81,73,.09);
+    border-radius:12px;padding:16px 18px;margin-top:18px;font-size:14px}
+  .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,16px);z-index:20;
+    background:var(--accent);color:#fff;font-size:14px;font-weight:700;padding:12px 20px;
+    border-radius:11px;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+  footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--border);
+    font-size:12.5px;color:var(--muted-dim)}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="wrap">
+  <div class="eyebrow"><i></i><span>Boldpiq · Internal</span></div>
+  <h1>Recommended <em>fixes</em></h1>
+  <p class="lede">Every recommendation from the report, rewritten for an AI to act on.
+    One button copies the lot — section headings included — so you can paste it straight
+    into ChatGPT, Claude or your editor.</p>
+  <p class="meta" id="meta">Loading…</p>
+  <div class="chips" id="chips"></div>
+
+  <div class="bar">
+    <button class="btn primary" id="copyall" type="button">Copy all recommendations</button>
+    <a class="btn" id="pdf" href="#" target="_blank" rel="noopener">Open the PDF ↗</a>
+    <a class="btn" href="/" >Back to the audit tool</a>
+    <span class="barnote" id="barnote"></span>
+  </div>
+
+  <div id="body"></div>
+
+  <footer>Generated from the audit — no new scan was run to build this page.
+    Wording is Boldpiq's; findings are the scanner's and Lighthouse's.</footer>
+</div>
+<div class="toast" id="toast">Copied</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const file = decodeURIComponent(location.pathname.replace(/^\/fixes\//, ""));
+let pack = null;
+
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function toast(msg){
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("on"), 1600);
+}
+
+async function copy(text, what){
+  try{
+    await navigator.clipboard.writeText(text);
+  }catch(e){
+    // Clipboard API needs a secure context; fall back so this still works on plain http.
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); }
+    catch(err){ ta.remove(); toast("Could not copy — select the text instead"); return; }
+    ta.remove();
+  }
+  toast(what);
+}
+
+function chips(p){
+  const s = p.scores || {}, out = [];
+  const add = (label, val) => { if(val !== null && val !== undefined)
+    out.push(`<span class="chip">${label} <b>${val}</b>/100</span>`); };
+  add("Overall", s.overall); add("SEO", s.seo); add("AEO", s.aeo); add("GEO", s.geo);
+  add("Speed", s.performance); add("Accessibility", s.accessibility);
+  add("Best practice", s["best-practices"]); add("Agentic", s["agentic-browsing"]);
+  const c = p.counts || {};
+  if(c.critical) out.push(`<span class="chip crit"><b>${c.critical}</b> critical</span>`);
+  if(c.high) out.push(`<span class="chip high"><b>${c.high}</b> high</span>`);
+  return out.join("");
+}
+
+function sectionHtml(s){
+  const hi = s.items.slice(0, 3).map(it => `<li>
+      <span class="p ${esc(it.priority)}">${esc(it.priority)}</span>
+      <span class="t"><b>${esc(it.title)}</b>
+        <span>${esc(it.fix)}</span>
+        ${it.note ? `<span class="warn">⚠ ${esc(it.note)}</span>` : ""}</span>
+    </li>`).join("");
+  const more = s.count > s.items.length
+    ? `<span class="barnote">${s.count - s.items.length} lower-priority items trimmed</span>` : "";
+  return `<section class="sec" id="sec-${esc(s.key)}">
+    <div class="sechead">
+      <h2>${esc(s.title)}</h2>
+      <span class="n">${s.count} ${s.count === 1 ? "recommendation" : "recommendations"}</span>
+    </div>
+    ${s.blurb ? `<p class="blurb">${esc(s.blurb)}</p>` : ""}
+    <ul class="hi">${hi}</ul>
+    <details class="raw"><summary>See all ${s.items.length} in full</summary>
+      <pre class="md">${esc(s.markdown)}</pre></details>
+    <div class="secfoot">
+      <button class="btn small" type="button" data-copy="${esc(s.key)}">Copy just this section</button>
+      ${more}
+    </div>
+  </section>`;
+}
+
+function render(p){
+  pack = p;
+  document.title = `Fix list — ${p.site}`;
+  $("meta").innerHTML = `<b>${esc(p.client)}</b> · <a href="${esc(p.url)}" target="_blank"
+      rel="noopener">${esc(p.site)}</a> · audited ${esc(p.generated)}
+      ${p.platform && p.platform.name ? " · " + esc(p.platform.name) : ""}`;
+  $("chips").innerHTML = chips(p);
+  $("pdf").href = "/download/" + encodeURIComponent(file);
+
+  const total = p.sections.reduce((n, s) => n + s.count, 0);
+  $("barnote").textContent =
+    `${total} recommendations across ${p.sections.length} sections`;
+
+  let notes = "";
+  if(!p.lighthouse){
+    notes += `<div class="note">This report's Chrome measurement wasn't kept, so speed,
+      accessibility, best-practice and agentic fixes are not in this list. Re-run the
+      audit to get them.</div>`;
+  }
+  $("body").innerHTML = notes + p.sections.map(sectionHtml).join("");
+}
+
+document.addEventListener("click", ev => {
+  const btn = ev.target.closest("[data-copy]");
+  if(!btn || !pack) return;
+  const s = pack.sections.find(x => x.key === btn.dataset.copy);
+  if(s) copy(s.markdown, `Copied ${s.title.toLowerCase()}`);
+});
+
+$("copyall").addEventListener("click", () => {
+  if(!pack) return;
+  copy(pack.markdown, "Copied every recommendation");
+});
+
+(async () => {
+  try{
+    const res = await fetch("/api/fixes/" + encodeURIComponent(file));
+    const j = await res.json();
+    if(!res.ok) throw new Error(j.error || "Could not load the fix list.");
+    if(!j.sections || !j.sections.length){
+      $("meta").textContent = "";
+      $("body").innerHTML = `<div class="note">Nothing to fix — every check in this
+        report passed. Worth saying so to the client in those words.</div>`;
+      $("copyall").disabled = true;
+      return;
+    }
+    render(j);
+  }catch(err){
+    $("meta").textContent = "";
+    $("body").innerHTML = `<div class="error"><b>Fix list unavailable</b><br>${esc(err.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
