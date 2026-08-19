@@ -106,8 +106,19 @@
     transition:border-color .18s,background .18s}
   .rep:hover{border-color:rgba(196,84,26,.5);background:rgba(196,84,26,.06)}
   .rep .site{font-weight:600;font-size:14.5px;word-break:break-all}
-  .rep .meta{font-size:12px;color:var(--muted-dim);margin-top:2px}
-  .rep .dl{font-size:12px;color:var(--accent);font-weight:700;flex:none}
+  .rep .meta{display:block;font-size:12px;color:var(--muted-dim);margin-top:3px}
+  .rep .who{min-width:0}
+  .rep .acts{display:flex;align-items:center;gap:14px;flex:none}
+  .rep .dl{font-size:12px;color:var(--accent);font-weight:700;flex:none;text-decoration:none}
+  .rep .redo{font-size:12px;font-weight:700;color:var(--muted-dim);background:none;
+    border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:5px 10px;cursor:pointer;
+    transition:color .15s,border-color .15s}
+  .rep .redo:hover,.rep .redo:focus-visible{color:var(--accent);border-color:rgba(196,84,26,.6)}
+  .rep .del{font-size:12px;font-weight:700;color:var(--muted-dim);background:none;
+    border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:5px 10px;cursor:pointer;
+    transition:color .15s,border-color .15s}
+  .rep .del:hover,.rep .del:focus-visible{color:#ff6b6b;border-color:rgba(255,107,107,.6)}
+  .rep .del[disabled]{opacity:.5;cursor:default}
   .empty{color:var(--muted-dim);font-size:14px}
 
   footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--border);
@@ -161,12 +172,6 @@
             </span>
           </label>
 
-          <label class="toggle">
-            <input type="checkbox" id="skiplh">
-            <span>Skip the Chrome measurements (faster)
-              <span class="hint">About 30 seconds quicker, but drops four sections: speed, accessibility, best practices and agentic browsing.</span>
-            </span>
-          </label>
         </div>
       </details>
 
@@ -225,12 +230,46 @@ async function loadRecent(){
     $("recent").innerHTML = reports.map(r => {
       const when = new Date(r.modified*1000).toLocaleString([], {
         day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
-      return `<a class="rep" href="/download/${encodeURIComponent(r.file)}" target="_blank" rel="noopener">
-        <span><span class="site">${r.site}</span><span class="meta">${when} · ${r.size_kb} KB</span></span>
-        <span class="dl">Open ↗</span></a>`;
+      const f = encodeURIComponent(r.file);
+      return `<div class="rep">
+        <span class="who"><span class="site">${r.site}</span><span class="meta">${when} · ${r.size_kb} KB</span></span>
+        <span class="acts">
+          <a class="dl" href="/download/${f}" target="_blank" rel="noopener">Open ↗</a>
+          ${r.url ? `<button class="redo" type="button" data-url="${escapeHtml(r.url)}" aria-label="Run the audit again for ${r.site}">Redo</button>` : ""}
+          <button class="del" type="button" data-file="${f}" data-site="${r.site}" aria-label="Delete report for ${r.site}">Delete</button>
+        </span>
+      </div>`;
     }).join("");
   }catch(e){ /* leave whatever was there */ }
 }
+
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".rep .redo");
+  if(!btn) return;
+  $("url").value = btn.dataset.url;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  // Reuse the real submit path rather than duplicating the fetch/poll logic.
+  $("form").requestSubmit();
+});
+
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".rep .del");
+  if(!btn) return;
+  const site = btn.dataset.site || "this report";
+  if(!confirm(`Delete the report for ${site}? This cannot be undone.`)) return;
+  btn.disabled = true; btn.textContent = "Deleting…";
+  try{
+    const res = await fetch("/api/reports/" + btn.dataset.file, { method: "DELETE" });
+    if(!res.ok){
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || "Delete failed.");
+    }
+    await loadRecent();
+  }catch(e){
+    btn.disabled = false; btn.textContent = "Delete";
+    alert(e.message || "Could not delete that report.");
+  }
+});
 
 function stop(){ clearInterval(timer); clearInterval(poll); timer = poll = null; }
 
@@ -305,7 +344,6 @@ $("form").addEventListener("submit", async e => {
         client: $("client").value.trim(),
         keyphrase: $("keyphrase").value.trim(),
         desktop: $("desktop").checked,
-        lighthouse: !$("skiplh").checked,
       })
     });
     job = await res.json();
