@@ -973,7 +973,7 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     <div class="btag">Websites &middot; AI &middot; Lead Systems</div></div></div>
 
   <h1 class="ctitle">Website<br>Visibility <em>Report</em></h1>
-  <p class="csub">An independent audit of how this website performs in Google search
+  <p class="csub">An evidence-based audit of how this website performs in Google search
     and in AI assistants — and exactly what to fix first.</p>
 
   <div class="csite"><small>Prepared for</small>{e(display)}
@@ -1066,7 +1066,7 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 {glossary_section()}
 
 <section class="page">
-  <h2 class="sec">What this report covers &mdash; and what it can promise</h2>
+  <h2 class="sec">What this report covers</h2>
   <p class="lead">We would rather set this out plainly than have it discovered later.
     This report is a measurement, and a measurement is not a promise of position.</p>
 
@@ -1080,7 +1080,7 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
       accuracy, legal or regulatory compliance, or anything happening on pages that
       were not audited.</p></div>
 
-  <div class="box"><h3>We aim for 90+, and we usually get there &mdash; but not always</h3>
+  <div class="box"><h3>We aim for 90+ &mdash; and on accessibility we insist on it</h3>
     <p style="font-size:9.5pt;color:#4A5261">Our working target on every score in this
       report is 90 or better. On most sites that is achievable. Some scores are only
       partly ours to control, and <strong>Performance is the clearest example</strong>.
@@ -1089,12 +1089,38 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
       tools, review and social embeds, embedded video and maps &mdash; the code your
       website builder generates, the connection and device the test runs on, and the
       run-to-run variation built into the test itself (a few points either way is normal,
-      so read a score as a band, not a fixed number). Accessibility and best-practice
-      scores can be capped the same way. On closed platforms such as Wix, Squarespace or
-      Shopify, certain fixes are structurally impossible &mdash; where that applies to
-      this site it is stated explicitly in the platform section, and we will not bill
-      for work a platform will not permit. Where a 90+ is not reachable, we will say so,
-      say why, and tell you what the realistic ceiling is.</p></div>
+      so read a score as a band, not a fixed number). Best-practice scores can be capped
+      the same way. On closed platforms such as Wix, Squarespace or Shopify, certain fixes
+      are structurally impossible &mdash; where that applies to this site it is stated
+      explicitly in the platform section, and we will not bill for work a platform will
+      not permit. Where a 90+ is not reachable, we will say so, say why, and tell you what
+      the realistic ceiling is.</p>
+    <p style="font-size:9.5pt;color:#4A5261;margin-top:3mm"><strong>Accessibility is the
+      exception, and we treat it as non-negotiable.</strong> Every site Boldpiq builds is
+      engineered to score 90 or above for accessibility; anything less is our defect, not
+      a platform limitation. Two things stay true even so: an automated score of 90+ is
+      not the same as full WCAG conformance &mdash; automated testing can only detect part
+      of what the standard requires, and no tool certifies a site as accessible &mdash; and
+      the score can slip after handover if images, embeds or content are added without the
+      same care.</p></div>
+
+  <div class="box"><h3>Comparing this to a later re-scan</h3>
+    <p style="font-size:9.5pt;color:#4A5261">When we re-run this audit after the work,
+      the comparison is only like-for-like if it is run with the same tools at the same
+      versions, on the same device type. Google changes how Lighthouse weights and
+      calculates scores between versions, and the structural scan engine can change its
+      own scoring without notice &mdash; so a score can move by a few points for reasons
+      that have nothing to do with your website. The exact versions used for this run are
+      recorded in the small print on the last page. Where a re-scan crosses a version
+      change, we will say so and compare the underlying findings rather than lean on the
+      headline number.</p></div>
+
+</section>
+
+<section class="page">
+  <h2 class="sec">What a score can &mdash; and cannot &mdash; promise</h2>
+  <p class="lead">This is the part most agencies leave vague. We would rather you
+    heard it from us, in writing, before you spend anything.</p>
 
   <div class="box dark"><h3>Scores are not rankings</h3>
     <p>A strong SEO, AEO and GEO score means your site is technically findable,
@@ -1116,6 +1142,17 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     strongest technical starting position available on your platform, and re-running
     this exact audit afterwards so the movement is documented in writing rather than
     claimed.</p></div>
+
+  <div class="box" style="margin-top:6mm"><h3>What we do commit to</h3>
+    <ul>
+      <li>Measuring honestly, and showing you the evidence behind every finding.</li>
+      <li>Fixing what is measurable and within our control &mdash; and saying plainly
+        when something is not.</li>
+      <li>Holding every site we build to 90 or above for accessibility.</li>
+      <li>Never billing you for work your platform will not permit.</li>
+      <li>Re-running this exact audit afterwards, so any movement is documented rather
+        than claimed.</li>
+    </ul></div>
 </section>
 
 <section class="page">
@@ -1149,9 +1186,16 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     citation by any AI assistant, all of which are also determined by competition and by
     third-party ranking systems outside Boldpiq's control. Some scores &mdash;
     Performance in particular &mdash; are constrained by the hosting platform, third-party
-    scripts and test conditions, and vary between runs. See &ldquo;What this report covers&rdquo;
+    scripts and test conditions, and vary between runs. Scores are comparable only between
+    runs of the same tool versions, recorded here, on the same device type; scoring
+    methodology changes between versions. See &ldquo;What this report covers&rdquo;
     above and boldpiq.com/disclaimers. {lh_credit}Structural scan engine:
-    seoscore.tools. Analysis, prioritisation and recommendations: Boldpiq.</p>
+    seoscore.tools. Analysis, prioritisation and recommendations: Boldpiq.<br><br>
+    If this report reached you unsolicited, it was prepared as an introduction to our
+    work and is yours to keep and act on, with or without us. To receive nothing further
+    from Boldpiq and have your details deleted, reply &ldquo;unsubscribe&rdquo; to the
+    message it arrived with or email support@boldpiq.com &mdash; we act on it the same
+    day. CINNIMON t/a BoldPiq (Reg 2015/193038/07), South Africa.</p>
 </section>"""
 
 

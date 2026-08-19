@@ -119,8 +119,8 @@ def _run_job(job):
         cmd += ["--keyphrase", job["keyphrase"]]
     if job["form_factor"] == "desktop":
         cmd += ["--desktop"]
-    if not job["lighthouse"]:
-        cmd += ["--no-lighthouse"]
+    # Lighthouse is mandatory: every report must be a real measurement of the live
+    # page, never a structural-scan-only shortcut. The request flag is ignored.
 
     lines = []
     try:
@@ -138,8 +138,14 @@ def _run_job(job):
         for needle, message, percent in PROGRESS:
             if needle in low:
                 _set(job, message=message, percent=percent)
-        if line.strip().startswith("overall "):
-            _set(job, summary=line.strip(), message="Finishing up…", percent=92)
+        stripped = line.strip()
+        if stripped.startswith("overall "):
+            _set(job, summary=stripped, message="Finishing up…", percent=92)
+        elif stripped.startswith("lighthouse "):
+            # Second summary line. Append rather than replace — dropping it was why
+            # reports looked like they had no Chrome measurements.
+            prev = job.get("summary") or ""
+            _set(job, summary=(prev + "\n" + stripped).strip())
         if time.time() > deadline:
             proc.kill()
             _set(job, state="error",
@@ -161,6 +167,51 @@ def _run_job(job):
          message="Report ready.")
 
 
+_URL_CACHE = {}
+
+
+# ── retention ────────────────────────────────────────────────────────────────
+# Audits are run against prospects' sites, so the PDFs and their scan JSON are
+# third-party data we hold without a contract. POPIA says don't keep it longer
+# than the purpose needs. 12 months is the purpose: long enough that a re-scan
+# can still be compared against the original, short enough to be defensible.
+
+RETENTION_DAYS = int(os.environ.get("BOLDPIQ_RETENTION_DAYS", "365"))
+
+
+def _purge_old_reports():
+    """Delete reports past the retention window. Returns the number removed."""
+    if RETENTION_DAYS <= 0 or not os.path.isdir(REPORTS):
+        return 0
+    cutoff = time.time() - RETENTION_DAYS * 86400
+    removed = 0
+    for name in os.listdir(REPORTS):
+        if not name.lower().endswith((".pdf", ".json")):
+            continue
+        path = os.path.join(REPORTS, name)
+        try:
+            if os.stat(path).st_mtime >= cutoff:
+                continue
+            os.remove(path)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        _URL_CACHE.clear()
+        print(f"retention: removed {removed} file(s) older than {RETENTION_DAYS} days",
+              flush=True)
+    return removed
+
+
+def _retention_loop():
+    while True:
+        try:
+            _purge_old_reports()
+        except Exception as err:                       # never let the sweeper die
+            print(f"retention: sweep failed: {err}", flush=True)
+        time.sleep(24 * 3600)
+
+
 def _worker():
     while True:
         job = _queue.get()
@@ -176,6 +227,25 @@ def _worker():
 
 # ── report listing ───────────────────────────────────────────────────────────
 
+
+def _report_url(pdf_name, mtime):
+    """The audited URL, read from the report's JSON companion. Cached by mtime."""
+    key = (pdf_name, mtime)
+    if key in _URL_CACHE:
+        return _URL_CACHE[key]
+    url = ""
+    if pdf_name.lower().endswith(".pdf"):
+        side = os.path.join(REPORTS, pdf_name[:-4] + ".json")
+        try:
+            with open(side, "r", encoding="utf-8") as fh:
+                url = (json.load(fh) or {}).get("url") or ""
+        except (OSError, ValueError):
+            url = ""
+    _URL_CACHE.clear()          # single-entry-per-file is enough; keeps this unbounded-safe
+    _URL_CACHE[key] = url
+    return url
+
+
 def _recent_reports(limit=25):
     if not os.path.isdir(REPORTS):
         return []
@@ -190,6 +260,7 @@ def _recent_reports(limit=25):
             continue
         out.append({"file": name,
                     "site": name.split("-visibility-report-")[0],
+                    "url": _report_url(name, stat.st_mtime),
                     "size_kb": round(stat.st_size / 1024),
                     "modified": stat.st_mtime})
     out.sort(key=lambda r: r["modified"], reverse=True)
@@ -275,6 +346,37 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.do_GET()
 
+    def do_DELETE(self):
+        path = urllib.parse.urlparse(self.path).path
+        prefix = "/api/reports/"
+        if not path.startswith(prefix):
+            return self._send(404, {"error": "Not found."})
+
+        name = urllib.parse.unquote(path[len(prefix):])
+        # Validate by membership in the real listing, not by sanitising the input:
+        # a name that is not already a report we serve is simply not deletable.
+        known = {r["file"] for r in _recent_reports(limit=10_000)}
+        if name not in known:
+            return self._send(404, {"error": "That report no longer exists."})
+
+        removed = []
+        for candidate in (name, name[:-4] + ".json" if name.lower().endswith(".pdf") else None):
+            if not candidate:
+                continue
+            target = os.path.join(REPORTS, candidate)
+            # Belt and braces: the resolved path must still sit inside REPORTS.
+            if os.path.realpath(os.path.dirname(target)) != os.path.realpath(REPORTS):
+                continue
+            try:
+                os.remove(target)
+                removed.append(candidate)
+            except FileNotFoundError:
+                pass            # the .json companion may legitimately not exist
+            except OSError as e:
+                return self._send(500, {"error": f"Could not delete: {e}"})
+
+        return self._send(200, {"deleted": removed})
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         if path != "/api/scan":
@@ -302,7 +404,7 @@ class Handler(BaseHTTPRequestHandler):
             client=(payload.get("client") or "").strip()[:120],
             keyphrase=(payload.get("keyphrase") or "").strip()[:120],
             form_factor="desktop" if payload.get("desktop") else "mobile",
-            lighthouse=payload.get("lighthouse", True) is not False,
+            lighthouse=True,   # always — see _run_job
         )
         _queue.put(job)
         _queue_positions()
@@ -344,7 +446,11 @@ def main():
     except Exception as err:
         print(f"  lighthouse: unavailable ({err})")
 
+    print(f"  retention: {RETENTION_DAYS} days" if RETENTION_DAYS > 0 else
+          "  retention: disabled")
+
     threading.Thread(target=_worker, daemon=True, name="scan-worker").start()
+    threading.Thread(target=_retention_loop, daemon=True, name="retention").start()
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
 
