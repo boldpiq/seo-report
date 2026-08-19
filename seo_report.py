@@ -1066,6 +1066,59 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 {glossary_section()}
 
 <section class="page">
+  <h2 class="sec">What this report covers &mdash; and what it can promise</h2>
+  <p class="lead">We would rather set this out plainly than have it discovered later.
+    This report is a measurement, and a measurement is not a promise of position.</p>
+
+  <div class="box"><h3>What was measured</h3>
+    <p style="font-size:9.5pt;color:#4A5261">Automated, evidence-based checks run
+      against the single page listed on the cover, as it was published at the moment
+      of scanning: structural SEO, AEO and GEO factors, plus a live Google Lighthouse
+      run for speed, accessibility, best practices and agentic browsing. Every finding
+      is reproducible and can be re-tested. What this report does <strong>not</strong>
+      cover is the quality of your commercial offer, your pricing, your content&rsquo;s
+      accuracy, legal or regulatory compliance, or anything happening on pages that
+      were not audited.</p></div>
+
+  <div class="box"><h3>We aim for 90+, and we usually get there &mdash; but not always</h3>
+    <p style="font-size:9.5pt;color:#4A5261">Our working target on every score in this
+      report is 90 or better. On most sites that is achievable. Some scores are only
+      partly ours to control, and <strong>Performance is the clearest example</strong>.
+      It is affected by the hosting platform and its server response times, third-party
+      scripts you rely on commercially &mdash; chat widgets, tracking pixels, booking
+      tools, review and social embeds, embedded video and maps &mdash; the code your
+      website builder generates, the connection and device the test runs on, and the
+      run-to-run variation built into the test itself (a few points either way is normal,
+      so read a score as a band, not a fixed number). Accessibility and best-practice
+      scores can be capped the same way. On closed platforms such as Wix, Squarespace or
+      Shopify, certain fixes are structurally impossible &mdash; where that applies to
+      this site it is stated explicitly in the platform section, and we will not bill
+      for work a platform will not permit. Where a 90+ is not reachable, we will say so,
+      say why, and tell you what the realistic ceiling is.</p></div>
+
+  <div class="box dark"><h3>Scores are not rankings</h3>
+    <p>A strong SEO, AEO and GEO score means your site is technically findable,
+    readable and quotable &mdash; that search engines and AI assistants can crawl it,
+    understand it and cite it. That is the part we can engineer, and it is the part
+    most businesses get wrong.</p>
+    <p style="margin-top:3mm">It is not the same as a position. Where you actually rank
+    &mdash; and whether an AI assistant names you &mdash; is decided by competition:
+    how many businesses are chasing the same search, how long they have been
+    established, their backlinks, their review volume, their ad spend, and their own
+    ongoing effort. Google and the AI platforms also change how they rank, without
+    notice and without explaining themselves. It is entirely possible to score higher
+    than a competitor and still sit below them on a particular search, and to move
+    positions on a term with no change to your own site at all.</p>
+    <p style="margin-top:3mm"><strong>So we do not promise a #1 position, a specific
+    keyword ranking, a traffic number, a volume of enquiries, or that any named AI
+    assistant will recommend you.</strong> Any business that does promise that is
+    guessing. What we do commit to is this: fixing what is measurable, giving you the
+    strongest technical starting position available on your platform, and re-running
+    this exact audit afterwards so the movement is documented in writing rather than
+    claimed.</p></div>
+</section>
+
+<section class="page">
   <div class="cta">
     <h2>Want this <em>fixed</em>?</h2>
     <p>Boldpiq builds and maintains websites that are engineered to be found — by
@@ -1091,7 +1144,13 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     {e(data.get('url',''))}. Scores reflect the page as published at the time of
     scanning and will change as the site changes. Automated checks cover technical and
     structural factors; they do not replace a manual review of content quality,
-    commercial positioning or legal compliance. {lh_credit}Structural scan engine:
+    commercial positioning or legal compliance. Scores measure how findable and readable
+    a site is; they are not a guarantee of search position, traffic, enquiries or
+    citation by any AI assistant, all of which are also determined by competition and by
+    third-party ranking systems outside Boldpiq's control. Some scores &mdash;
+    Performance in particular &mdash; are constrained by the hosting platform, third-party
+    scripts and test conditions, and vary between runs. See &ldquo;What this report covers&rdquo;
+    above and boldpiq.com/disclaimers. {lh_credit}Structural scan engine:
     seoscore.tools. Analysis, prioritisation and recommendations: Boldpiq.</p>
 </section>"""
 
