@@ -230,7 +230,8 @@ $("copyall").addEventListener("click", () => {
 
 (async () => {
   try{
-    const res = await fetch("/api/fixes/" + encodeURIComponent(file));
+    // no-store: same-day re-runs share this URL, so a cached body is a different run.
+    const res = await fetch("/api/fixes/" + encodeURIComponent(file), {cache: "no-store"});
     const j = await res.json();
     if(!res.ok) throw new Error(j.error || "Could not load the fix list.");
     if(!j.sections || !j.sections.length){

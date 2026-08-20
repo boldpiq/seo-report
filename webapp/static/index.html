@@ -225,7 +225,7 @@ async function health(){
 
 async function loadRecent(){
   try{
-    const {reports} = await (await fetch("/api/reports")).json();
+    const {reports} = await (await fetch("/api/reports", {cache: "no-store"})).json();
     if(!reports.length){
       $("recent").innerHTML = `<p class="empty">No reports yet. Your first one will appear here.</p>`;
       return;
@@ -238,7 +238,7 @@ async function loadRecent(){
         <span class="who"><span class="site">${r.site}</span><span class="meta">${when} · ${r.size_kb} KB</span></span>
         <span class="acts">
           <a class="dl" href="/download/${f}" target="_blank" rel="noopener">Open ↗</a>
-          ${r.fixes ? `<a class="dl fixes" href="/fixes/${f}" target="_blank" rel="noopener">Fixes ↗</a>` : ""}
+          ${r.fixes ? `<a class="dl fixes" href="/fixes/${f}?v=${Math.round(r.modified)}" target="_blank" rel="noopener">Fixes ↗</a>` : ""}
           ${r.url ? `<button class="redo" type="button" data-url="${escapeHtml(r.url)}" aria-label="Run the audit again for ${r.site}">Redo</button>` : ""}
           <button class="del" type="button" data-file="${f}" data-site="${r.site}" aria-label="Delete report for ${r.site}">Delete</button>
         </span>
@@ -292,7 +292,9 @@ function finish(job){
 
   $("msg").textContent = "Report ready.";
   const href = "/download/" + encodeURIComponent(job.pdf);
-  const fixes = "/fixes/" + encodeURIComponent(job.pdf);
+  // ?v= stamps the link so a freshly finished run can never open a copy of this page
+  // cached from an earlier run of the same site today (the path alone is identical).
+  const fixes = "/fixes/" + encodeURIComponent(job.pdf) + "?v=" + Date.now();
   $("result").innerHTML = `<div class="done">
       <a class="btn primary" href="${href}" target="_blank" rel="noopener">Open the report</a>
       <a class="btn" href="${href}" download>Download PDF</a>
