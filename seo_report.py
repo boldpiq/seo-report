@@ -1282,7 +1282,10 @@ def main():
                       f"({lh.last_error}) — continuing without it", file=sys.stderr)
 
         generated = dt.datetime.now()
-        stamp = generated.strftime("%Y-%m-%d")
+        # Time, not just date: two runs of one site in a day used to write the same
+        # filename, so the second silently replaced the first — PDF, scan JSON and fix
+        # pack — and any link already handed out then pointed at different numbers.
+        stamp = generated.strftime("%Y-%m-%d-%H%M")
         base = os.path.join(a.out, f"{slug(url)}-visibility-report-{stamp}")
 
         with open(base + ".json", "w") as f:

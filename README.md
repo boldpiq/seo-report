@@ -32,9 +32,9 @@ cd ~/boldpiq-tools/seo-report
 PDF, the raw scan JSON and the fix pack land in `reports/`:
 
 ```
-reports/clientdomain-co-za-visibility-report-2026-08-03.pdf
-reports/clientdomain-co-za-visibility-report-2026-08-03.json
-reports/clientdomain-co-za-visibility-report-2026-08-03-fixes.json
+reports/clientdomain-co-za-visibility-report-2026-08-03-1412.pdf
+reports/clientdomain-co-za-visibility-report-2026-08-03-1412.json
+reports/clientdomain-co-za-visibility-report-2026-08-03-1412-fixes.json
 ```
 
 Takes about 40 seconds per site, most of it Lighthouse.
