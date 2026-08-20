@@ -160,6 +160,9 @@ function chips(p){
   add("Overall", s.overall); add("SEO", s.seo); add("AEO", s.aeo); add("GEO", s.geo);
   add("Speed", s.performance); add("Accessibility", s.accessibility);
   add("Best practice", s["best-practices"]); add("Agentic", s["agentic-browsing"]);
+  // Lighthouse has its own SEO category — a different measurement to the SEO pillar
+  // above, so it gets its own chip rather than quietly replacing it.
+  add("Lighthouse SEO", s["lighthouse-seo"]);
   const c = p.counts || {};
   if(c.critical) out.push(`<span class="chip crit"><b>${c.critical}</b> critical</span>`);
   if(c.high) out.push(`<span class="chip high"><b>${c.high}</b> high</span>`);

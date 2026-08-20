@@ -277,6 +277,42 @@ def _recent_reports(limit=25):
 # reports predate that, so we rebuild theirs on the fly from the scan JSON —
 # without the Lighthouse sections, which the scan JSON does not carry.
 
+def _reconcile(pack, base):
+    """Make the pack's headline scores agree with the scan that produced the report.
+
+    The scan JSON is the record of what was measured, so it wins. This repairs packs
+    written before Lighthouse's own "seo" category stopped overwriting the SEO pillar,
+    and catches any future drift between the PDF and this page rather than letting the
+    two quietly disagree in front of a client.
+    """
+    try:
+        with open(base + ".json", "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return pack
+    scores = pack.get("scores") or {}
+    pillars = []
+    for key in ("seo", "aeo", "geo"):
+        val = (data.get(key) or {}).get("score")
+        if not isinstance(val, (int, float)):
+            continue
+        if scores.get(key) != val:
+            if key == "seo" and scores.get("lighthouse-seo") is None:
+                scores["lighthouse-seo"] = scores.get(key)   # what had overwritten it
+            scores[key] = val
+        pillars.append(val)
+    if pillars:
+        scores["overall"] = round(sum(pillars) / len(pillars))
+    pack["scores"] = scores
+    if pack.get("preamble"):
+        import fixpack
+        pack["preamble"] = fixpack._preamble(pack)
+        for sec in pack.get("sections", []):
+            sec["markdown"] = fixpack._section_markdown(pack, sec)
+        pack["markdown"] = fixpack._full_markdown(pack)
+    return pack
+
+
 def _fixpack_for(pdf_name):
     """(pack, error). Reads the companion file, else derives one from the scan JSON."""
     if not pdf_name.lower().endswith(".pdf"):
@@ -287,7 +323,7 @@ def _fixpack_for(pdf_name):
     if os.path.isfile(side):
         try:
             with open(side, "r", encoding="utf-8") as fh:
-                return json.load(fh), None
+                return _reconcile(json.load(fh), base), None
         except (OSError, ValueError):
             pass                       # fall through and rebuild it
 

@@ -107,12 +107,16 @@ def build(data, an, client=None, generated=None):
     lhr = an.get("lh")
     prof = an.get("platform") or {}
 
+    # Pillar scores first. Lighthouse ALSO has a category called "seo" — merging its
+    # score dict in flat used to overwrite the structural SEO pillar with Lighthouse's
+    # (nearly always 100), so the pack disagreed with the PDF and with its own overall.
+    # Lighthouse SEO is a different measurement: keep it, under its own key.
     scores = {"overall": an.get("overall")}
     for key in ("seo", "aeo", "geo"):
         scores[key] = (an["pillars"].get(key) or {}).get("score")
     if lhr:
         for key, val in (lhr.get("scores") or {}).items():
-            scores[key] = val
+            scores["lighthouse-seo" if key == "seo" else key] = val
 
     sections = []
 
@@ -213,7 +217,8 @@ def _preamble(pack):
     if pack["lighthouse"]:
         for key, label in (("performance", "Speed"), ("accessibility", "Accessibility"),
                            ("best-practices", "Best practices"),
-                           ("agentic-browsing", "Agentic")):
+                           ("agentic-browsing", "Agentic"),
+                           ("lighthouse-seo", "Lighthouse SEO")):
             if sc.get(key) is not None:
                 bits.append(f"{label} {sc[key]}/100")
     lines = [
