@@ -25,6 +25,14 @@ services:
       # Courtesy gap between consecutive scans. seoscore.tools' terms forbid
       # excessive scanning and jobs already run one at a time — this is the
       # second layer of that promise.
+      # Competitor discovery. Free tier, official API with published terms — we do
+      # not scrape search results. Absent, the ranking report falls back to a
+      # manually supplied competitor list and says so in the report.
+      BOLDPIQ_BRAVE_KEY: "${BOLDPIQ_BRAVE_KEY:-}"
+      # Open PageRank — free 0-10 domain strength from the Common Crawl link
+      # graph. The free stand-in for a paid authority metric. Absent, the report
+      # shows no strength column rather than estimating one.
+      BOLDPIQ_OPR_KEY: "${BOLDPIQ_OPR_KEY:-}"
       BOLDPIQ_JOB_GAP: "6"
       BOLDPIQ_JOB_TIMEOUT: "600"
     # Chrome is memory-hungry in bursts. Capping keeps a runaway scan from

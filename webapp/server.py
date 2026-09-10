@@ -41,10 +41,33 @@ sys.path.insert(0, ROOT)
 
 import runtime  # noqa: E402  (needs ROOT on the path first)
 
+sys.path.insert(0, HERE)
+import profiles  # noqa: E402
+
 REPORTS = os.environ.get("BOLDPIQ_REPORTS") or os.path.join(ROOT, "reports")
 PORT = int(os.environ.get("PORT", "8090"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 # Courtesy gap between consecutive scans, on top of running them one at a time.
+# rank-report is a sibling directory, not a copy. It imports runtime.py and the
+# Geist font from seo-report so both reports look like the same document family.
+# Local dev: ../rank-report (sibling checkout). In the image it is staged to
+# /app/rank-report by the Dockerfile. Whichever exists wins.
+_RANK_CANDIDATES = [os.path.join(ROOT, "rank-report"),
+                    os.path.join(ROOT, "..", "rank-report")]
+RANK_ROOT = os.environ.get("BOLDPIQ_RANK_ROOT") or next(
+    (p for p in _RANK_CANDIDATES if os.path.isdir(p)), _RANK_CANDIDATES[-1])
+
+# Search Console exports uploaded from the browser. This is the client's own
+# Google data — held only as long as the job that consumes it, then deleted.
+# Remembered per-client inputs, so a monthly report is one click rather than
+# fifteen fields. Kept beside the reports, which is already the data directory
+# and already backed up.
+PROFILES = os.environ.get("BOLDPIQ_PROFILES") or REPORTS
+
+UPLOADS = os.environ.get("BOLDPIQ_UPLOADS") or os.path.join(REPORTS, "_uploads")
+MAX_UPLOAD_BYTES = int(os.environ.get("BOLDPIQ_MAX_UPLOAD", str(25 * 1024 * 1024)))
+UPLOAD_EXTS = (".csv", ".zip", ".xlsx")
+
 JOB_GAP_SECONDS = int(os.environ.get("BOLDPIQ_JOB_GAP", "6"))
 JOB_TIMEOUT = int(os.environ.get("BOLDPIQ_JOB_TIMEOUT", "600"))
 MAX_JOBS_KEPT = 200
@@ -64,12 +87,19 @@ PROGRESS = [
     ("scanning",            "Scanning the site's structure…",              15),
     ("measuring in chrome", "Measuring real load speed in Chrome…",        40),
     ("rendering pdf",       "Building the PDF report…",                    85),
+    # rank-report's own progress lines
+    ("crawl gate",          "Checking every page is its own document…",    20),
+    ("competitors",         "Measuring the competition…",                  50),
+    ("proximity",           "Measuring distance to each target area…",     70),
 ]
 
 
-def _new_job(url, client, keyphrase, form_factor, lighthouse):
+def _new_job(url, client, keyphrase, form_factor, lighthouse,
+             kind="audit", opts=None):
     job = {
         "id": uuid.uuid4().hex[:12],
+        "kind": kind,               # "audit" (visibility report) | "rank" (ranking report)
+        "opts": opts or {},         # rank-report only: suburb, queries, competitors, …
         "url": url,
         "client": client,
         "keyphrase": keyphrase,
@@ -82,6 +112,8 @@ def _new_job(url, client, keyphrase, form_factor, lighthouse):
         "pdf": None,
         "summary": None,
         "error": None,
+        "checks": [],               # sources that did not return data, live
+        "checks_summary": None,
     }
     with _jobs_lock:
         _jobs[job["id"]] = job
@@ -112,16 +144,41 @@ def _queue_positions():
 def _run_job(job):
     _set(job, state="running", message="Starting…", percent=5)
 
-    cmd = [sys.executable, "-u", os.path.join(ROOT, "seo_report.py"),
-           job["url"], "--out", REPORTS, "--no-desktop"]
-    if job["client"]:
-        cmd += ["--client", job["client"]]
-    if job["keyphrase"]:
-        cmd += ["--keyphrase", job["keyphrase"]]
-    if job["form_factor"] == "desktop":
-        cmd += ["--desktop"]
-    # Lighthouse is mandatory: every report must be a real measurement of the live
-    # page, never a structural-scan-only shortcut. The request flag is ignored.
+    if job.get("kind") == "rank":
+        # rank-report lives in a sibling directory and shares runtime.py and the
+        # font from here. Same queue, same gap, same timeout — only the command
+        # differs, which is the whole reason it is one service and not two.
+        o = job.get("opts") or {}
+        cmd = [sys.executable, "-u", os.path.join(RANK_ROOT, "rank_report.py"),
+               job["url"]]
+        if job["client"]:
+            cmd += ["--client", job["client"]]
+        for flag, key in (("--suburb", "suburb"), ("--queries", "queries"),
+                          ("--competitors", "competitors"), ("--areas", "areas"),
+                          ("--pin", "pin"), ("--gbp-url", "gbp_url"),
+                          ("--money-page", "money_page"), ("--compare", "compare"),
+                          ("--gsc", "gsc"), ("--reviews", "reviews"),
+                          ("--competitor-reviews", "competitor_reviews"),
+                          ("--location", "location"), ("--country", "country")):
+            if o.get(key):
+                # --flag=value, never --flag value. A map pin in the southern
+                # hemisphere starts with a minus sign, and argparse reads a bare
+                # "-26.13,27.96" as an unknown option rather than a value. The
+                # heuristic that saves plain negative numbers does not apply once
+                # there is a comma in it, and it differs between Python versions —
+                # which is why this passed locally and failed in the container.
+                cmd += [f"{flag}={o[key]}"]
+    else:
+        cmd = [sys.executable, "-u", os.path.join(ROOT, "seo_report.py"),
+               job["url"], "--out", REPORTS, "--no-desktop"]
+        if job["client"]:
+            cmd += ["--client", job["client"]]
+        if job["keyphrase"]:
+            cmd += ["--keyphrase", job["keyphrase"]]
+        if job["form_factor"] == "desktop":
+            cmd += ["--desktop"]
+        # Lighthouse is mandatory: every report must be a real measurement of the
+        # live page, never a structural-scan-only shortcut. The flag is ignored.
 
     lines = []
     try:
@@ -140,7 +197,20 @@ def _run_job(job):
             if needle in low:
                 _set(job, message=message, percent=percent)
         stripped = line.strip()
-        if stripped.startswith("overall "):
+        if stripped.startswith("CHECK "):
+            # One line per source that did not return data. Surfaced live in the
+            # panel so a broken key is seen while the operator is still at the
+            # screen, rather than discovered by a client reading a gap.
+            bits = stripped[len("CHECK "):].split("\t")
+            if len(bits) >= 2:
+                checks = list(job.get("checks") or [])
+                checks.append({"status": bits[0].strip(),
+                               "label": bits[1].strip(),
+                               "remedy": bits[2].strip() if len(bits) > 2 else ""})
+                _set(job, checks=checks)
+        elif stripped.startswith("CHECKS:"):
+            _set(job, checks_summary=stripped[len("CHECKS:"):].strip())
+        elif stripped.startswith("overall "):
             _set(job, summary=stripped, message="Finishing up…", percent=92)
         elif stripped.startswith("lighthouse "):
             # Second summary line. Append rather than replace — dropping it was why
@@ -156,6 +226,15 @@ def _run_job(job):
 
     proc.wait()
 
+    # The export is the client's own Google data. It exists to be read once by
+    # this job; holding it past that is retention we have no reason for.
+    consumed = (job.get("opts") or {}).get("gsc")
+    if consumed and os.path.abspath(os.path.dirname(consumed)) == os.path.abspath(UPLOADS):
+        try:
+            os.remove(consumed)
+        except OSError:
+            pass
+
     pdf = next((ln.strip() for ln in reversed(lines)
                 if ln.strip().lower().endswith(".pdf")), None)
 
@@ -163,6 +242,15 @@ def _run_job(job):
         detail = "\n".join(lines[-6:]).strip() or "No output from the report tool."
         _set(job, state="error", error=detail)
         return
+
+    if job.get("kind") == "rank":
+        # Saved only on success: a run that failed halfway may have been given
+        # nonsense, and remembering it would hand the same nonsense back next month.
+        try:
+            profiles.save(PROFILES, job["url"],
+                          {**(job.get("opts") or {}), "client": job.get("client")})
+        except Exception as err:                       # never fail a good report
+            print(f"profiles: could not save: {err}", flush=True)
 
     _set(job, state="done", percent=100, pdf=os.path.basename(pdf),
          message="Report ready.")
@@ -178,6 +266,29 @@ _URL_CACHE = {}
 # can still be compared against the original, short enough to be defensible.
 
 RETENTION_DAYS = int(os.environ.get("BOLDPIQ_RETENTION_DAYS", "365"))
+
+
+def _purge_stale_uploads(max_age_hours=24):
+    """Delete uploads no job ever consumed.
+
+    A job deletes its own export when it finishes. This catches the ones nobody
+    ever submitted — a file picked in the form and then abandoned. Client data
+    with no purpose left has no business sitting on disk.
+    """
+    if not os.path.isdir(UPLOADS):
+        return 0
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for name in os.listdir(UPLOADS):
+        path = os.path.join(UPLOADS, name)
+        try:
+            if os.stat(path).st_mtime >= cutoff:
+                continue
+            os.remove(path)
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def _purge_old_reports():
@@ -208,6 +319,7 @@ def _retention_loop():
     while True:
         try:
             _purge_old_reports()
+            _purge_stale_uploads()
         except Exception as err:                       # never let the sweeper die
             print(f"retention: sweep failed: {err}", flush=True)
         time.sleep(24 * 3600)
@@ -378,9 +490,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _public(self, job):
         keep = ("id", "url", "client", "state", "message", "percent", "pdf",
-                "summary", "error")
+                "summary", "error", "checks", "checks_summary")
         with _jobs_lock:
-            return {k: job[k] for k in keep}
+            return {k: job.get(k) for k in keep}
 
     # -- routes --
     def do_GET(self):
@@ -388,6 +500,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             return self._file(os.path.join(HERE, "static", "index.html"),
+                              "text/html; charset=utf-8")
+
+        if path in ("/rank", "/rank.html"):
+            return self._file(os.path.join(HERE, "static", "rank.html"),
                               "text/html; charset=utf-8")
 
         if path == "/api/health":
@@ -421,6 +537,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/reports":
             return self._send(200, {"reports": _recent_reports()})
+
+        if path == "/api/clients":
+            try:
+                return self._send(200, {"clients": profiles.listing(PROFILES)})
+            except Exception as err:
+                return self._send(500, {"error": str(err)})
 
         if path.startswith("/api/job/"):
             job = _jobs.get(path.rsplit("/", 1)[-1])
@@ -476,9 +598,62 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._send(200, {"deleted": removed})
 
+    def _upload(self):
+        """Take one Search Console export and hand back a token for it.
+
+        Raw body plus an X-Filename header rather than multipart: the file is the
+        entire request, and stdlib multipart parsing buys nothing here. The name
+        is used only for its extension and to show the operator what they picked;
+        the stored path is a generated id, so nothing a browser sends becomes a
+        filename on disk.
+        """
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return self._send(400, {"error": "No file received."})
+        if length > MAX_UPLOAD_BYTES:
+            return self._send(413, {"error": "That file is larger than "
+                                             f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB."})
+        given = os.path.basename(self.headers.get("X-Filename") or "export")
+        ext = os.path.splitext(given)[1].lower()
+        if ext not in UPLOAD_EXTS:
+            return self._send(400, {"error": "Search Console exports are .csv, .zip "
+                                             "or .xlsx. Use Export → Download CSV or "
+                                             "Download Excel."})
+        os.makedirs(UPLOADS, exist_ok=True)
+        token = uuid.uuid4().hex[:16]
+        target = os.path.join(UPLOADS, token + ext)
+        remaining, written = length, 0
+        try:
+            with open(target, "wb") as fh:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    remaining -= len(chunk)
+                    written += len(chunk)
+        except OSError as err:
+            return self._send(500, {"error": f"Could not store the file: {err}"})
+        if written == 0:
+            os.remove(target)
+            return self._send(400, {"error": "The file was empty."})
+        return self._send(200, {"token": token, "name": given, "bytes": written})
+
+    def _upload_path(self, token):
+        """Resolve a token to a stored file. Token only — never a client path."""
+        if not token or not re.fullmatch(r"[0-9a-f]{16}", token):
+            return None
+        for ext in UPLOAD_EXTS:
+            cand = os.path.join(UPLOADS, token + ext)
+            if os.path.isfile(cand):
+                return cand
+        return None
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
-        if path != "/api/scan":
+        if path == "/api/upload":
+            return self._upload()
+        if path not in ("/api/scan", "/api/rank"):
             return self._send(404, {"error": "Not found."})
 
         length = int(self.headers.get("Content-Length") or 0)
@@ -498,13 +673,32 @@ class Handler(BaseHTTPRequestHandler):
                                     "That doesn't look like a website address. "
                                     "Try something like clientdomain.co.za"})
 
-        job = _new_job(
-            url=url,
-            client=(payload.get("client") or "").strip()[:120],
-            keyphrase=(payload.get("keyphrase") or "").strip()[:120],
-            form_factor="desktop" if payload.get("desktop") else "mobile",
-            lighthouse=True,   # always — see _run_job
-        )
+        if path == "/api/rank":
+            opts = {k: (payload.get(k) or "").strip()[:600] for k in
+                    ("suburb", "queries", "competitors", "areas",
+                     "pin", "gbp_url", "money_page", "compare",
+                     "reviews", "competitor_reviews", "location", "country")}
+            opts = {k: v for k, v in opts.items() if v}
+            gsc_path = self._upload_path((payload.get("gsc_token") or "").strip())
+            if gsc_path:
+                opts["gsc"] = gsc_path
+            elif payload.get("gsc_token"):
+                return self._send(400, {"error": "That upload has expired. "
+                                                 "Attach the export again."})
+            job = _new_job(
+                url=url,
+                client=(payload.get("client") or "").strip()[:120],
+                keyphrase="", form_factor="mobile", lighthouse=False,
+                kind="rank", opts=opts,
+            )
+        else:
+            job = _new_job(
+                url=url,
+                client=(payload.get("client") or "").strip()[:120],
+                keyphrase=(payload.get("keyphrase") or "").strip()[:120],
+                form_factor="desktop" if payload.get("desktop") else "mobile",
+                lighthouse=True,   # always — see _run_job
+            )
         _queue.put(job)
         _queue_positions()
         return self._send(202, self._public(job))

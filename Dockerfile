@@ -31,6 +31,16 @@ ENV BOLDPIQ_CHROME=/usr/bin/chromium \
 
 WORKDIR /app
 COPY checks.py fixpack.py lighthouse.py platforms.py runtime.py seo_report.py ./
+
+# rank-report ships as a sibling directory inside the image. It imports runtime.py
+# and the Geist font from /app so both reports look like one document family.
+#
+# ⚠️  Two things bite here:
+#     1. This COPY list is explicit — a module not named will not exist in the
+#        container (fixpack.py taught us that once already).
+#     2. The build context is this directory, so the files must be staged into
+#        ./rank-report before building. `make stage` / DEPLOY.md covers it.
+COPY rank-report/ ./rank-report/
 COPY assets/ ./assets/
 COPY webapp/ ./webapp/
 
