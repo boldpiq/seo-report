@@ -257,13 +257,12 @@ def font_face():
 
 
 def ring(score, size=118):
-    """SVG donut for a score."""
-    if score is None:
-        score, dash = 0, 0
+    """SVG donut for a score. An unmeasured score shows a dash, never a zero."""
+    colour = {"good": "#16794A", "fair": ACCENT, "poor": "#A32619", "na": "#98A2B3"}[band(score)]
     r = (size / 2) - 9
     circ = 2 * 3.14159265 * r
-    dash = circ * (score / 100.0)
-    colour = {"good": "#16794A", "fair": ACCENT, "poor": "#A32619", "na": "#98A2B3"}[band(score)]
+    dash = circ * ((score or 0) / 100.0)
+    score = "—" if score is None else score
     return f"""<svg class="ring" viewBox="0 0 {size} {size}" width="{size}" height="{size}">
   <circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="#E7E3DE" stroke-width="9"/>
   <circle cx="{size/2}" cy="{size/2}" r="{r}" fill="none" stroke="{colour}" stroke-width="9"
@@ -278,18 +277,48 @@ def bar(pct, colour=ACCENT):
     return (f'<div class="bar"><span style="width:{pct}%;background:{colour}"></span></div>')
 
 
+def short_path(url, width=64):
+    """A page as the client knows it: its path, not the full address."""
+    p = urllib.parse.urlparse(url)
+    path = (p.path or "/") + ("?" + p.query if p.query else "")
+    return path if len(path) <= width else path[:width - 1] + "…"
+
+
+PAGES_SHOWN = 8
+
+
+def pages_block(i):
+    """Whole-site audits: which pages an issue was found on. The PDF lists the
+    first few; the fix list carries every one."""
+    pages = i.get("pages") or []
+    if not pages or i.get("sitewide"):
+        return ""
+    same = i.get("same_note")
+    lis = "".join(
+        f'<li><code>{e(p.get("show") or short_path(p["url"]))}</code>'
+        f'{"" if same or not p.get("note") else " — " + e(p["note"])}</li>'
+        for p in pages[:PAGES_SHOWN])
+    if len(pages) > PAGES_SHOWN:
+        lis += (f'<li class="more">…and {len(pages) - PAGES_SHOWN} more. Every '
+                f'affected page is listed in the fix list.</li>')
+    of = f" of {i['applicable']}" if i.get("applicable") else ""
+    return (f'<div class="pgs"><span class="lbl">Pages affected ({len(pages)}{of})</span>'
+            f'<ul>{lis}</ul></div>')
+
+
 def issue_card(i, n, platform_name):
     limit = ""
-    extra_tag = ""
+    extra_tag = ('<span class="tag site">Site-wide · one fix</span>'
+                 if i.get("sitewide") else "")
     if i["limit_status"] == plat.BLOCKED:
-        extra_tag = '<span class="tag blocked">Not fixable on this stack</span>'
+        extra_tag += '<span class="tag blocked">Not fixable on this stack</span>'
         limit = f"""<div class="limit blocked">
           <span class="lbl">Platform limitation — {e(platform_name)}</span>
           <p>{e(i['limit_reason'])} The fix above is the correct one in principle, but it
              cannot be carried out while the site stays on this platform. Treat this as a
              reason to replatform, or as an accepted risk — not as a task.</p></div>"""
     elif i["limit_status"] == plat.LIMITED:
-        extra_tag = '<span class="tag limited">Platform constrained</span>'
+        extra_tag += '<span class="tag limited">Platform constrained</span>'
         limit = f"""<div class="limit">
           <span class="lbl">Platform limitation — {e(platform_name)}</span>
           <p>{e(i['limit_reason'])}</p></div>"""
@@ -310,6 +339,7 @@ def issue_card(i, n, platform_name):
     <div class="blk"><span class="lbl">Why it matters</span><p>{e(i['why'])}</p></div>
     <div class="blk"><span class="lbl">How it gets fixed</span><p>{e(i['fix'])}</p></div>
   </div>
+  {pages_block(i)}
   {limit}
 </article>"""
 
@@ -408,6 +438,7 @@ def lh_card(i, n):
     <div class="blk"><span class="lbl">Why it matters</span><p>{e(i['why'])}</p></div>
     {fix}
   </div>
+  {pages_block(i)}
 </article>"""
 
 
@@ -419,16 +450,42 @@ def lh_sections(l):
         if l["form_factor"] == "mobile" else "a desktop browser on a fast connection"
     colours = {"good": "#16794A", "fair": ACCENT, "poor": "#A32619"}
 
+    site = bool(l.get("site"))
+    n_lh = l.get("pages_measured") or 1
+
     mrows = ""
     for m in l["metrics"]:
         col = colours[m["rating"]]
         core = '<span class="cwv">Core Web Vital</span>' if m["core"] else ""
+        spread = (f'<span class="mt">{m["pages_over"]} of {m["pages"]} pages over target</span>'
+                  if site and m.get("pages") else "")
         mrows += f"""<div class="mtr">
           <div class="mtl"><strong>{e(m['name'])}</strong> <span class="ab">{m['abbr']}</span>{core}
             <p>{e(m['meaning'])}</p></div>
           <div class="mtv"><span class="mv" style="color:{col}">{e(m['value'])}</span>
-            <span class="mt">target {e(m['target'])}</span></div>
+            <span class="mt">target {e(m['target'])}</span>{spread}</div>
         </div>"""
+
+    # Whole-site: every page's own speed, slowest first — the averages above
+    # hide exactly the page a client needs to hear about.
+    speed_table = ""
+    if site and l.get("per_page"):
+        def cell(v, rating=None):
+            if v is None:
+                return '<td class="na">—</td>'
+            return f'<td class="b-{rating or band(v)}">{e(v)}</td>'
+        rows = sorted(l["per_page"],
+                      key=lambda p: (p["scores"].get("performance") is None,
+                                     p["scores"].get("performance") or 0))
+        trs = "".join(
+            f'<tr><td class="pth">{e(short_path(p["url"], 48))}</td>'
+            f'{cell(p["scores"].get("performance"))}'
+            + "".join(cell(p[k]["value"], p[k]["rating"]) if p.get(k) else cell(None)
+                      for k in ("lcp", "cls", "tbt"))
+            + "</tr>" for p in rows)
+        speed_table = f"""<h3 style="margin:7mm 0 2mm">Every page, slowest first</h3>
+  <table class="sc"><thead><tr><th>Page</th><th>Speed</th><th>LCP</th><th>CLS</th>
+    <th>TBT</th></tr></thead><tbody>{trs}</tbody></table>"""
 
     opps = l["opportunities"]
     orows = "".join(
@@ -447,26 +504,32 @@ def lh_sections(l):
     a11y_cards = "".join(lh_card(i, n) for n, i in enumerate(l["accessibility_issues"], 1))
     bp_cards = "".join(lh_card(i, n) for n, i in enumerate(l["best_practice_issues"], 1))
 
+    scope = (f" Every one of the {n_lh} pages was measured separately; the "
+             f"scores are averages and each timing is the median page — half the "
+             f"site is faster, half is slower." if site else "")
+    avg = "Average performance" if site else "Performance"
+
     speed = f"""<section class="page">
   <h2 class="sec">Speed &amp; Core Web Vitals</h2>
   <p class="lead">Measured by Google Lighthouse in a real Chrome browser on {ff} —
     the same engine and thresholds Google uses to judge page experience. These are
-    measurements, not estimates.</p>
+    measurements, not estimates.{scope}</p>
 
   <div class="lhhead">{ring(perf, 104)}
-    <div><h3>Performance {perf}/100</h3>
+    <div><h3>{avg} {perf if perf is not None else '—'}/100</h3>
       <p>{e(verdict_for("performance", perf))} Speed is not a vanity metric: it decides how many people
       stay long enough to see the offer. Google's own research puts the risk of a
       visitor leaving at more than 100% higher when load time goes from one second
       to six.</p>
-      <p class="small">{l['passing']['performance']} performance audits passed.</p></div>
+      <p class="small">{l['passing']['performance']} performance audits passed{' on the average page' if site else ''}.</p></div>
   </div>
 
   <h3 style="margin:6mm 0 1mm">What each measurement means</h3>
   {mrows}
+  {speed_table}
 
   {'<h3 style="margin:7mm 0 1mm">Biggest speed opportunities</h3>'
-   '<p class="lead">Ordered by the impact Lighthouse measured on this page.</p>'
+   f'<p class="lead">{"Ordered by how many pages each one affects, then by the time it costs." if site else "Ordered by the impact Lighthouse measured on this page."}</p>'
    f'<ul class="climit">{orows}{more}</ul>' if opps else
    '<div class="box" style="margin-top:6mm"><h3>No significant speed opportunities</h3>'
    '<p style="font-size:9.5pt;color:#4A5261">Lighthouse found nothing material to '
@@ -477,16 +540,16 @@ def lh_sections(l):
   <h2 class="sec">Accessibility</h2>
   <p class="lead">How usable this site is with a screen reader, a keyboard, or
     impaired vision — tested against the WCAG guidelines by Lighthouse's automated
-    audit.</p>
+    audit{f', on each of the {n_lh} pages' if site else ''}.</p>
 
   <div class="lhhead">{ring(a11y, 104)}
-    <div><h3>Accessibility {a11y}/100</h3>
+    <div><h3>{'Average accessibility' if site else 'Accessibility'} {a11y if a11y is not None else '—'}/100</h3>
       <p>{e(verdict_for("accessibility", a11y))} Roughly one in six people has a disability affecting how
       they use the web, and accessibility fixes overwhelmingly improve the experience
       for everyone else too — bigger tap targets and better contrast help every
       customer on a phone in the sun.</p>
-      <p class="small">{l['passing']['accessibility']} accessibility audits passed ·
-      {len(l['accessibility_issues'])} failing.</p></div>
+      <p class="small">{l['passing']['accessibility']} accessibility audits passed{' on the average page' if site else ''} ·
+      {len(l['accessibility_issues'])} failing{' somewhere on the site' if site else ''}.</p></div>
   </div>
 
   <div class="box"><h3>An honest caveat</h3>
@@ -571,6 +634,122 @@ def agentic_section(l):
 </section>"""
 
 
+def _score_td(v):
+    return '<td class="na">—</td>' if v is None else f'<td class="b-{band(v)}">{v}</td>'
+
+
+def coverage_section(an):
+    """Whole-site: how the pages were found, and where every page stands."""
+    cov = an["coverage"]
+    lhs = {p["url"]: p["scores"] for p in ((an.get("lh") or {}).get("per_page") or [])}
+    pp = an.get("per_page") or {}
+    rows = []
+    for r in cov["results"]:
+        s, l = pp.get(r["url"]) or {}, lhs.get(r["url"]) or {}
+        vals = [s.get("seo"), s.get("aeo"), s.get("geo"), l.get("performance"),
+                l.get("accessibility"), l.get("best-practices"), l.get("agentic-browsing")]
+        known = [v for v in vals if v is not None]
+        rows.append((sum(known) / len(known) if known else -1, r, vals))
+    rows.sort(key=lambda x: (x[0] < 0, x[0]))
+
+    trs = ""
+    for _, r, vals in rows:
+        flags = []
+        if r["url"] == cov["home"]:
+            flags.append("homepage")
+        if r.get("noindex"):
+            flags.append("noindex")
+        if not r["scan_ok"]:
+            flags.append("scan failed")
+        if not r["lh_ok"] and cov["lighthouse"]:
+            flags.append("Chrome failed")
+        tag = f' <span class="pflag">{e(" · ".join(flags))}</span>' if flags else ""
+        trs += (f'<tr><td class="pth">{e(short_path(r["url"], 46))}{tag}</td>'
+                + "".join(_score_td(v) for v in vals) + "</tr>")
+
+    failed = [r for r in cov["results"] if not r["scan_ok"] or (cov["lighthouse"] and not r["lh_ok"])]
+    failed_box = ""
+    if failed:
+        lis = "".join(
+            f'<li><code>{e(short_path(r["url"]))}</code> — '
+            + e("; ".join(x for x in (
+                ("structural scan failed: " + (r["scan_error"] or "no response")) if not r["scan_ok"] else "",
+                ("Chrome measurement failed: " + (r["lh_error"] or "no result"))
+                if cov["lighthouse"] and not r["lh_ok"] else "") if x))
+            + "</li>" for r in failed)
+        failed_box = f"""<div class="box"><h3>Pages we could not fully measure ({len(failed)})</h3>
+    <p style="font-size:9.5pt;color:#4A5261">These pages were audited, but one of the
+      two measurements did not complete. Their missing scores are shown as a dash and
+      left out of the averages — they are not counted as zero.</p>
+    <ul class="climit">{lis}</ul></div>"""
+
+    skipped = ""
+    if cov["not_audited"]:
+        lis = "".join(f'<li><code>{e(short_path(u))}</code></li>'
+                      for u in cov["not_audited"][:60])
+        more = (f'<li class="more">…and {len(cov["not_audited"]) - 60} more.</li>'
+                if len(cov["not_audited"]) > 60 else "")
+        skipped = f"""<div class="box"><h3>Found but not audited ({len(cov['not_audited'])})</h3>
+    <p style="font-size:9.5pt;color:#4A5261">This run audits up to {cov['limit']} pages.
+      These further live pages were found and are listed so nothing is silently left
+      out. They are included in the site-structure checks, but have no scores.</p>
+    <ul class="wlist">{lis}{more}</ul></div>"""
+
+    sm = (f"{cov['sitemap_count']} address{'es' if cov['sitemap_count'] != 1 else ''} in "
+          f"{len(cov['sitemap_files'])} sitemap file{'s' if len(cov['sitemap_files']) != 1 else ''}"
+          if cov["sitemap_files"] else "No sitemap found")
+    lh_note = "" if cov["lighthouse"] else " (Chrome measurements were not run for this report.)"
+
+    return f"""<section class="page">
+  <h2 class="sec">Every page we audited <span class="secn">({len(cov['results'])})</span></h2>
+  <p class="lead">We read the site's sitemap and followed its own links from the
+    homepage to find every page it publishes, then audited each page on its own:
+    structure, AI readiness and — in Chrome — speed, accessibility, best practices and
+    agentic browsing. The scores on the cover are averages across these pages. This
+    table shows where each page stands, weakest first.{lh_note}</p>
+
+  <div class="covgrid">
+    <div><span class="cv">{cov['sitemap_count'] if cov['sitemap_files'] else '—'}</span><span class="cl">In the sitemap</span></div>
+    <div><span class="cv">{cov['found_by_links']}</span><span class="cl">Found only by following links</span></div>
+    <div><span class="cv">{cov['live_count']}</span><span class="cl">Live pages found</span></div>
+    <div><span class="cv">{len(cov['results'])}</span><span class="cl">Pages audited</span></div>
+  </div>
+  <p class="small" style="font-size:8.5pt;color:#6B7280;margin:-2mm 0 4mm">{e(sm)}.
+    Redirects, error pages and exact duplicates are not audited as pages of their
+    own — they appear under Site structure instead.</p>
+
+  <table class="sc"><thead><tr><th>Page</th><th>SEO</th><th>AEO</th><th>GEO</th>
+    <th>Speed</th><th>Access.</th><th>Best pr.</th><th>Agentic</th></tr></thead>
+    <tbody>{trs}</tbody></table>
+  {failed_box}
+  {skipped}
+</section>"""
+
+
+def structure_section(an, platform_name):
+    """Whole-site: the checks that only exist across pages."""
+    rows = ""
+    for f in an["structure"]:
+        st, col = (("Pass", "#16794A") if f["pass"] else
+                   ("Not measured", "#6B7280") if not f["measured"] else
+                   ("Fails", {"critical": "#A32619", "high": ACCENT}.get(f["priority"], "#B8860B")))
+        rows += f"""<div class="arow"><div class="ast" style="background:{col}">{st}</div>
+          <div class="atx"><h4>{e(f['title'])}</h4><p>{e(f['label'])}</p></div></div>"""
+    issues = an.get("structure_issues") or []
+    cards = "".join(issue_card(i, n, platform_name) for n, i in enumerate(issues, 1))
+    return f"""<section class="page">
+  <h2 class="sec">Site structure{f' <span class="secn">({len(issues)})</span>' if issues else ''}</h2>
+  <p class="lead">Checks that only exist across a whole site: whether the pages link
+    to each other properly, whether the sitemap tells Google the truth, and whether
+    any two pages compete with each other. No single-page audit can see any of this —
+    a site can score well page by page and still be structurally broken.</p>
+  {rows}
+  {'<h3 style="margin:7mm 0 3mm">What needs fixing</h3>' + cards if cards else
+   '<div class="box dark" style="margin-top:6mm"><h3>Structurally sound</h3><p>Every '
+   'cross-page check that could be measured passed.</p></div>'}
+</section>"""
+
+
 def build_html(data, an, client, generated):
     site = urllib.parse.urlparse(data.get("url", "")).netloc or data.get("url", "")
     display = client or site.replace("www.", "")
@@ -579,16 +758,21 @@ def build_html(data, an, client, generated):
     st = data.get("siteType") or {}
     cms = st.get("detectedCms")
     kind = (st.get("siteType") or "").replace("_", " ")
+    site = bool(an.get("site"))
+    n_pages = len(an["coverage"]["results"]) if site else 1
 
     # cover scores
     cards = ""
     for k, (abbr, full, blurb) in PILLARS.items():
         p = an["pillars"][k]
+        low = (f'<p class="cnt">Weakest page: {p["min"]}</p>'
+               if site and p.get("min") is not None else "")
         cards += f"""<div class="scard">
           {ring(p['score'])}
           <h3>{abbr}</h3>
-          <p class="full">{full}</p>
-          <p class="cnt">{p['passed']} of {p['total']} checks passed</p>
+          <p class="full">{full}{' · site average' if site else ''}</p>
+          <p class="cnt">{p['passed']} of {p['total']} checks {'pass on every page' if site else 'passed'}</p>
+          {low}
           <p class="iss">{len(p['issues'])} issue{'s' if len(p['issues'])!=1 else ''} found</p>
         </div>"""
 
@@ -946,6 +1130,34 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 .wlist li::before{{content:'';position:absolute;left:0;top:1.6mm;width:2.2mm;height:2.2mm;
   border-radius:50%;background:#16794A}}
 
+/* whole-site */
+.tag.site{{background:{INK};color:#fff}}
+.pgs{{margin:0 4.5mm 4mm 12mm;padding:2.5mm 3.5mm;background:#F7F5F1;border-radius:1.5mm}}
+.pgs ul{{list-style:none;margin-top:.5mm}}
+.pgs li{{font-size:8.3pt;color:#3A4150;line-height:1.45;padding:.4mm 0}}
+.pgs code,.climit code{{font-family:ui-monospace,Menlo,monospace;font-size:8pt;color:{INK};
+  background:#ECE8E1;padding:.2mm 1.2mm;border-radius:.8mm}}
+.pgs .more{{color:#6B7280;font-style:italic}}
+.covgrid{{display:flex;gap:3mm;margin:4mm 0 4mm}}
+.covgrid>div{{flex:1;border:1px solid #E4E0DA;border-top:3px solid {ACCENT};
+  border-radius:2mm;padding:3.5mm}}
+.cv{{display:block;font-size:22pt;font-weight:700;letter-spacing:-.03em;line-height:1}}
+.cl{{display:block;font-size:8pt;color:#6B7280;margin-top:1mm;line-height:1.3}}
+table.sc{{width:100%;border-collapse:collapse;font-size:8.5pt;margin-top:2mm}}
+table.sc thead{{display:table-header-group}}
+table.sc th{{text-align:center;font-size:7pt;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:#6B7280;padding:1.8mm 1mm;border-bottom:1.5px solid {INK}}}
+table.sc th:first-child{{text-align:left}}
+table.sc tr{{page-break-inside:avoid}}
+table.sc td{{padding:1.6mm 1mm;border-bottom:1px solid #EFECE7;text-align:center;
+  font-weight:650;width:11mm}}
+table.sc td.pth{{text-align:left;font-weight:500;width:auto;word-break:break-all;
+  font-family:ui-monospace,Menlo,monospace;font-size:7.8pt}}
+.pflag{{font-family:Geist,sans-serif;font-size:6.8pt;font-weight:650;letter-spacing:.04em;
+  text-transform:uppercase;color:#6B7280;margin-left:1.5mm}}
+td.b-good{{color:#16794A}}td.b-fair{{color:{ACCENT}}}td.b-poor{{color:#A32619}}
+td.na{{color:#98A2B3;font-weight:400}}
+
 /* glossary */
 .gloss{{columns:2;column-gap:7mm}}
 .grow{{break-inside:avoid;padding:.8mm 0;border-bottom:1px solid #F2EFEA}}
@@ -978,13 +1190,13 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     and in AI assistants — and exactly what to fix first.</p>
 
   <div class="csite"><small>Prepared for</small>{e(display)}
-    <span class="curl"><em>Page audited</em>{e(audited)}</span></div>
+    <span class="curl"><em>{'Whole site audited' if site else 'Page audited'}</em>{e(audited)}{f' &middot; {n_pages} page' + ('s' if n_pages != 1 else '') if site else ''}</span></div>
 
   <div class="overall">
     <div class="obig">{an['overall'] if an['overall'] is not None else '—'}<small>/100</small></div>
-    <div><span class="olab">Overall visibility score</span>
-      <p>{e(verdict(an['overall']))} We found <strong>{len(an['issues'])} issues</strong>
-      across {len(an['issues']) + len(an['passes'])} checks, of which
+    <div><span class="olab">Overall visibility score{' · average of every page' if site else ''}</span>
+      <p>{e(verdict(an['overall']))} We found <strong>{len(an['issues'])} {'distinct ' if site else ''}issues</strong>
+      {f'across {n_pages} pages, ' if site else ''}of which
       {an['counts']['critical'] + an['counts']['high']} are high impact.</p></div>
   </div>
 
@@ -1008,8 +1220,15 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
       what we found on the page, why it matters commercially, and what fixing it
       involves. Nothing here is a guess — every item is a specific, verifiable
       finding on this website, and every one of them can be re-tested once the work
-      is done.</p></div>
+      is done.</p>
+    {f'''<p style="font-size:9.5pt;color:#4A5261;margin-top:3mm">This is a whole-site
+      audit: all {n_pages} pages were checked individually. Each issue appears once,
+      with the pages it was found on, so a problem repeated across the site is one
+      line to fix rather than {n_pages}. Scores are averages across the pages; the
+      page-by-page table follows.</p>''' if site else ''}</div>
 </section>
+
+{coverage_section(an) if site else ''}
 
 <section class="page">
   <h2 class="sec">Where to start</h2>
@@ -1035,6 +1254,8 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     <strong>4. Medium and low items</strong> — worth doing once the above is done.</p></div>
 </section>
 
+{structure_section(an, an['platform']['name']) if site else ''}
+
 <section class="page">
   <h2 class="sec">AI assistant readiness</h2>
   <p class="lead">How this site scores against the specific things each AI platform
@@ -1059,7 +1280,7 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 
 <section class="page">
   <h2 class="sec">What's already working</h2>
-  <p class="lead">Not everything needs fixing. These {len(an['passes'])} checks passed
+  <p class="lead">Not everything needs fixing. These {len(an['passes'])} checks passed{' on every page audited' if site else ''}
     and are worth protecting during any future redesign or migration.</p>
   {working}
 </section>
@@ -1073,8 +1294,8 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
 
   <div class="box"><h3>What was measured</h3>
     <p style="font-size:9.5pt;color:#4A5261">Automated, evidence-based checks run
-      against the single page listed on the cover, as it was published at the moment
-      of scanning: structural SEO, AEO and GEO factors, plus a live Google Lighthouse
+      against {'every page listed under &ldquo;Every page we audited&rdquo;, each as it was published at the moment of scanning, plus cross-page checks of the site&rsquo;s structure' if site else 'the single page listed on the cover, as it was published at the moment of scanning'}:
+      structural SEO, AEO and GEO factors, plus a live Google Lighthouse
       run for speed, accessibility, best practices and agentic browsing. Every finding
       is reproducible and can be re-tested. What this report does <strong>not</strong>
       cover is the quality of your commercial offer, your pricing, your content&rsquo;s
@@ -1179,8 +1400,9 @@ h3{{font-size:13pt;font-weight:650;letter-spacing:-.01em}}
     </div>
   </div>
   <p class="disclaimer">Report generated {e(generated.strftime('%d %B %Y at %H:%M'))} for
-    {e(data.get('url',''))}. Scores reflect the page as published at the time of
-    scanning and will change as the site changes. Automated checks cover technical and
+    {e(data.get('url',''))}{f' ({n_pages} pages)' if site else ''}. Scores reflect the
+    {'pages' if site else 'page'} as published at the time of scanning and will change
+    as the site changes. Automated checks cover technical and
     structural factors; they do not replace a manual review of content quality,
     commercial positioning or legal compliance. Scores measure how findable and readable
     a site is; they are not a guarantee of search position, traffic, enquiries or
@@ -1232,6 +1454,106 @@ def normalise(url):
     return url
 
 
+# ── whole site ───────────────────────────────────────────────────────────────
+
+SITE_MAX_PAGES = int(os.environ.get("BOLDPIQ_SITE_MAX_PAGES", "100"))
+# Between structural scans. Longer than the single-page gap: a whole-site run is
+# many scans in a row, and seoscore.tools' terms ask for restraint.
+SITE_SCAN_GAP = float(os.environ.get("BOLDPIQ_SITE_SCAN_GAP", "8"))
+
+
+def run_site(url, a):
+    """Audit every page of the site. Returns (data, an) in the shapes build_html takes.
+
+    Two lanes run side by side: the structural scanner (remote, rate-limited) in a
+    thread, Lighthouse (local CPU, strictly one page at a time so pages do not
+    fight each other for the processor and distort each other's speed) in this
+    one. The run takes as long as the slower lane, not the sum of both.
+    """
+    import threading
+    import sitewide as sw
+
+    print("   discovering pages …", flush=True)
+    disc = sw.discover(url, limit=a.max_pages or SITE_MAX_PAGES,
+                       log=lambda m: print(m, flush=True))
+    print("   checking site structure …", flush=True)
+    struct = sw.structure(disc, sw.hosts_check(disc))
+
+    results = [{"url": u, "scan": None, "scan_error": None, "lh": None, "lh_error": None}
+               for u in disc["audit"]]
+    n = len(results)
+
+    def scan_lane():
+        for i, r in enumerate(results):
+            if i:
+                time.sleep(SITE_SCAN_GAP)
+            # A keyphrase belongs to one page. Applied to all of them it would
+            # flag "keyphrase missing" on every room and policy page.
+            kp = a.keyphrase if i == 0 else ""
+            for attempt in (1, 2):
+                try:
+                    r["scan"], r["scan_error"] = scan(r["url"], kp), None
+                    break
+                except SystemExit as err:          # scan() exits; one page must not
+                    r["scan_error"] = str(err)[:200]
+                    if attempt == 1:
+                        time.sleep(30)
+            print(f"   scanned {i + 1}/{n} {sw.path_of(r['url'])}"
+                  + ("" if r["scan"] else " — not measured"), flush=True)
+
+    lane = threading.Thread(target=scan_lane, daemon=True, name="scan-lane")
+    lane.start()
+
+    if not a.no_lighthouse:
+        ff = "desktop" if a.desktop else "mobile"
+        for i, r in enumerate(results):
+            print(f"   [{i + 1}/{n}] measuring in chrome {sw.path_of(r['url'])}", flush=True)
+            r["lh"] = lh.run(r["url"], ff)
+            if r["lh"] is None:
+                r["lh_error"] = lh.last_error
+                print(f"   chrome could not measure {sw.path_of(r['url'])} ({lh.last_error})",
+                      file=sys.stderr, flush=True)
+    if lane.is_alive():
+        print("   waiting for the structural scans to finish …", flush=True)
+    lane.join()
+
+    an = sw.aggregate(results, analyse, clean_label)
+    if an is None:
+        errs = {r["scan_error"] for r in results if r["scan_error"]}
+        raise SystemExit("The structural scanner could not read any page of this site. "
+                         + "; ".join(sorted(errs))[:400])
+    an = sw.finish(an, struct, plat.BLOCKED, plat.LIMITED)
+    an["lh"] = sw.aggregate_lh(results)
+
+    home_scan = next((r["scan"] for r in results if r["scan"]), {})
+    an["coverage"] = {
+        "home": disc["home"],
+        "limit": disc["limit"],
+        "lighthouse": not a.no_lighthouse,
+        "sitemap_files": disc["sitemap_files"],
+        "sitemap_count": disc["sitemap_count"],
+        "live_count": disc["live_count"],
+        "found_by_links": sum(1 for f in disc["pages"].values()
+                              if f["found_by"] == "links" and f["status"] == 200
+                              and f["html"] and not f["redirected"]),
+        "not_audited": disc["not_audited"],
+        "results": [{"url": r["url"], "scan_ok": bool(r["scan"]),
+                     "scan_error": r["scan_error"], "lh_ok": bool(r["lh"]),
+                     "lh_error": r["lh_error"],
+                     "noindex": disc["pages"][sw.key(r["url"])]["noindex"]}
+                    for r in results],
+    }
+    data = {"mode": "site", "url": disc["home"], "siteType": home_scan.get("siteType"),
+            "scannedAt": home_scan.get("scannedAt", "")}
+    # Everything needed to re-render or audit this run later. The crawl's link
+    # lists are dropped — they are working data and multiply the file size.
+    record = dict(data, discovery={k: v for k, v in disc.items() if k != "pages"},
+                  crawl=[{k: v for k, v in f.items() if k != "links"}
+                         for f in disc["pages"].values()],
+                  structure=struct, pages=results)
+    return data, an, record
+
+
 # ── cli ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1250,6 +1572,11 @@ def main():
                     help="skip the Chrome Lighthouse run (faster, less complete)")
     ap.add_argument("--desktop", action="store_true",
                     help="run Lighthouse as desktop instead of mobile")
+    ap.add_argument("--site", action="store_true",
+                    help="audit every page of the site (sitemap + link crawl), not "
+                         "just the URL given")
+    ap.add_argument("--max-pages", type=int, default=0,
+                    help=f"whole-site: most pages to audit (default {SITE_MAX_PAGES})")
     a = ap.parse_args()
 
     if not a.no_lighthouse and not lh.available()[0]:
@@ -1263,33 +1590,42 @@ def main():
         url = normalise(raw)
         print(f"→ {url}")
 
-        if a.from_json:
-            data = json.load(open(a.from_json))
-        else:
+        record = None
+        if a.site:
             if n:
-                time.sleep(6)   # stay well inside the scanner's fair-use limits
-            print("   scanning …")
-            data = scan(url, a.keyphrase)
+                time.sleep(6)
+            data, an, record = run_site(url, a)
+        else:
+            if a.from_json:
+                data = json.load(open(a.from_json))
+            else:
+                if n:
+                    time.sleep(6)   # stay well inside the scanner's fair-use limits
+                print("   scanning …")
+                data = scan(url, a.keyphrase)
 
-        an = analyse(data)
+            an = analyse(data)
 
-        an["lh"] = None
-        if not a.no_lighthouse:
-            print("   measuring in Chrome (Lighthouse) …")
-            an["lh"] = lh.run(url, "desktop" if a.desktop else "mobile")
-            if an["lh"] is None:
-                print(f"   Lighthouse did not complete after {lh.ATTEMPTS} attempts "
-                      f"({lh.last_error}) — continuing without it", file=sys.stderr)
+            an["lh"] = None
+            if not a.no_lighthouse:
+                print("   measuring in Chrome (Lighthouse) …")
+                an["lh"] = lh.run(url, "desktop" if a.desktop else "mobile")
+                if an["lh"] is None:
+                    print(f"   Lighthouse did not complete after {lh.ATTEMPTS} attempts "
+                          f"({lh.last_error}) — continuing without it", file=sys.stderr)
 
         generated = dt.datetime.now()
         # Time, not just date: two runs of one site in a day used to write the same
         # filename, so the second silently replaced the first — PDF, scan JSON and fix
         # pack — and any link already handed out then pointed at different numbers.
         stamp = generated.strftime("%Y-%m-%d-%H%M")
-        base = os.path.join(a.out, f"{slug(url)}-visibility-report-{stamp}")
+        # "-site-" after the marker keeps the site name parseable for the report
+        # list (it splits on "-visibility-report-") and marks the scope.
+        scope = "site-" if a.site else ""
+        base = os.path.join(a.out, f"{slug(url)}-visibility-report-{scope}{stamp}")
 
         with open(base + ".json", "w") as f:
-            json.dump(data, f, indent=1)
+            json.dump(record or data, f, indent=1)
 
         # Companion fix pack: the same findings, compressed for pasting into an AI.
         # Written here rather than derived later so it always reflects the run that
@@ -1312,6 +1648,10 @@ def main():
             os.remove(html_path)
 
         c = an["counts"]
+        if a.site:
+            print(f"   {len(an['coverage']['results'])} pages audited "
+                  f"({an['pages_scanned']} scanned, "
+                  f"{(an['lh'] or {}).get('pages_measured', 0)} measured in Chrome)")
         print(f"   overall {an['overall']}/100 · "
               f"SEO {an['pillars']['seo']['score']} · "
               f"AEO {an['pillars']['aeo']['score']} · "

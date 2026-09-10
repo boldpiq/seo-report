@@ -30,7 +30,7 @@ ENV BOLDPIQ_CHROME=/usr/bin/chromium \
     HOST=0.0.0.0
 
 WORKDIR /app
-COPY checks.py fixpack.py lighthouse.py platforms.py runtime.py seo_report.py ./
+COPY checks.py fixpack.py lighthouse.py platforms.py runtime.py seo_report.py sitewide.py ./
 
 # rank-report ships as a sibling directory inside the image. It imports runtime.py
 # and the Geist font from /app so both reports look like one document family.

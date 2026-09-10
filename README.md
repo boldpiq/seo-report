@@ -39,6 +39,36 @@ reports/clientdomain-co-za-visibility-report-2026-08-03-1412-fixes.json
 
 Takes about 40 seconds per site, most of it Lighthouse.
 
+## Whole-site audits
+
+```bash
+./seo-report.sh clientdomain.co.za --site                  # every page
+./seo-report.sh clientdomain.co.za --site --max-pages=30   # cap it
+```
+
+The web app runs this by default ("Only audit this one page" is the opt-out).
+`sitewide.py` reads the sitemap(s) — robots.txt `Sitemap:` lines first, then
+`/sitemap.xml`, `/sitemap_index.xml`, `/wp-sitemap.xml`, following sitemap indexes —
+and crawls the site's own links from the homepage to catch what the sitemap
+missed. Every live page (up to `--max-pages`, default `BOLDPIQ_SITE_MAX_PAGES=100`)
+gets its own structural scan **and** its own Lighthouse run. The two lanes run
+side by side — scans in a thread, Lighthouse strictly one page at a time so pages
+don't distort each other's speed — so a run takes about a minute per page.
+
+What changes in the report: cover scores are averages (with the weakest page),
+a page-by-page scorecard, a **Site structure** section for the checks only a
+crawl can make (broken internal links, soft 404s, SPA shell pages, duplicate
+content/titles/descriptions, sitemap entries that redirect or are noindexed or
+robots-blocked, pages missing from the sitemap, orphans, click depth > 3, links
+through redirects, host variants), and every issue carries the pages it was
+found on. Checks that describe one site file or header (`SITE_LEVEL`) are
+reported once as "site-wide · one fix" instead of "missing on 40 of 40 pages".
+Pages over the cap and pages whose scan or Chrome run failed are listed as
+such — never dropped, never averaged in as zero.
+
+Files are named `<site>-visibility-report-site-<stamp>.*`; the `.json` is the
+full per-page record (a few MB for a large site).
+
 ## Fix list for AI
 
 The PDF is written for the client. The **fix pack** (`-fixes.json`, and the

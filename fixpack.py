@@ -43,12 +43,27 @@ def _finding(label):
     return txt.split("—", 1)[0].strip() if "—" in txt else txt
 
 
+def _path(url):
+    p = urllib.parse.urlparse(url)
+    return (p.path or "/") + ("?" + p.query if p.query else "")
+
+
+def _pages(rows):
+    """Whole-site audits: the pages an item applies to, as path + optional note."""
+    out = []
+    for r in rows or []:
+        note = _sentence(r.get("note"))
+        out.append({"path": r.get("show") or _path(r["url"]), "note": note})
+    return out
+
+
 def _item(title, fix, priority="medium", effort=None, finding="", why="",
-          note="", section=""):
+          note="", section="", pages=None, sitewide=False):
     return {"title": _sentence(title), "fix": _sentence(fix),
             "priority": priority, "effort": effort,
             "finding": _sentence(finding), "why": _sentence(why),
-            "note": _sentence(note), "section": section}
+            "note": _sentence(note), "section": section,
+            "pages": _pages(pages), "sitewide": bool(sitewide)}
 
 
 def _from_issue(i):
@@ -58,8 +73,15 @@ def _from_issue(i):
                 "Do not attempt; flag it as a replatforming reason instead.")
     elif i.get("limit_status") == plat.LIMITED:
         note = f"Platform-constrained — {i.get('limit_reason', '')}"
+    # Whole-site findings: the label is "Found on 12 of 40 pages — …", which the
+    # em-dash split in _finding() would cut down to the count alone.
+    finding = i.get("label") if i.get("pages") else _finding(i.get("label"))
     return _item(i["title"], i["fix"], i["priority"], i.get("effort"),
-                 _finding(i.get("label")), i.get("why", ""), note)
+                 finding, i.get("why", ""), note,
+                 pages=i.get("pages"), sitewide=i.get("sitewide"))
+
+
+PAGES_IN_MARKDOWN = 60
 
 
 def _md_item(it, n):
@@ -70,6 +92,16 @@ def _md_item(it, n):
     line = f"{n}. **{it['title']}** _({' · '.join(tags)})_"
     if it["finding"]:
         line += f"\n   - Found: {it['finding']}"
+    if it.get("sitewide"):
+        line += "\n   - Scope: site-wide — one change fixes every page"
+    elif it.get("pages"):
+        pages = it["pages"]
+        same = len({p["note"] for p in pages}) == 1
+        line += f"\n   - Pages ({len(pages)}):"
+        for p in pages[:PAGES_IN_MARKDOWN]:
+            line += f"\n     - {p['path']}" + (f" — {p['note']}" if p["note"] and not same else "")
+        if len(pages) > PAGES_IN_MARKDOWN:
+            line += f"\n     - …and {len(pages) - PAGES_IN_MARKDOWN} more"
     if it["fix"]:
         line += f"\n   - Fix: {it['fix']}"
     if it["note"]:
@@ -127,6 +159,13 @@ def build(data, an, client=None, generated=None):
         "in its own section below, so fix it once.",
         [_from_issue(i) for i in an.get("quick_wins", [])]))
 
+    if an.get("site"):
+        sections.append(_section(
+            "structure", "Site structure",
+            "Cross-page problems: broken links, duplicate titles, sitemap errors, "
+            "orphaned pages. Each lists the exact addresses involved.",
+            [_from_issue(i) for i in an.get("structure_issues", [])]))
+
     titles = {"seo": ("SEO", "Findability in Google and Bing."),
               "aeo": ("AEO", "How readable and quotable the page is to AI assistants."),
               "geo": ("GEO", "How likely an AI assistant is to recommend this business by name.")}
@@ -146,7 +185,8 @@ def build(data, an, client=None, generated=None):
             "Ordered by the saving Lighthouse actually measured.",
             [_item(o["title"], o.get("fix") or o.get("why", ""),
                    "high" if o.get("severity") == "high" else "medium",
-                   finding=o.get("display", ""), why=o.get("why", ""))
+                   finding=o.get("display", ""), why=o.get("why", ""),
+                   pages=o.get("pages"))
              for o in opps]))
 
         sections.append(_section(
@@ -157,7 +197,7 @@ def build(data, an, client=None, generated=None):
                    "high" if a.get("severity") == "high" else "medium",
                    finding=a.get("display") or (f"{a['count']} element(s) affected"
                                                 if a.get("count") else ""),
-                   why=a.get("why", ""))
+                   why=a.get("why", ""), pages=a.get("pages"))
              for a in lhr.get("accessibility_issues") or []]))
 
         sections.append(_section(
@@ -165,7 +205,8 @@ def build(data, an, client=None, generated=None):
             "Standards, security and correctness as Chrome sees them.",
             [_item(b["title"], b.get("fix") or b.get("why", ""),
                    "high" if b.get("severity") == "high" else "medium",
-                   finding=b.get("display", ""), why=b.get("why", ""))
+                   finding=b.get("display", ""), why=b.get("why", ""),
+                   pages=b.get("pages"))
              for b in lhr.get("best_practice_issues") or []]))
 
         agentic = [a for a in (lhr.get("agentic") or [])
@@ -200,6 +241,8 @@ def build(data, an, client=None, generated=None):
                      "kind": prof.get("kind", "")},
         "scores": scores,
         "lighthouse": bool(lhr),
+        "mode": "site" if an.get("site") else "page",
+        "pages_audited": len((an.get("coverage") or {}).get("results") or []) or None,
         "total_issues": len(an.get("issues", [])),
         "counts": an.get("counts", {}),
         "sections": sections,
@@ -223,6 +266,8 @@ def _preamble(pack):
                 bits.append(f"{label} {sc[key]}/100")
     lines = [
         f"Site: {pack['url']}",
+        (f"Scope: whole site — {pack['pages_audited']} pages audited; scores are "
+         f"averages across them" if pack.get("mode") == "site" else ""),
         f"Audited: {pack['generated']} (Boldpiq website audit)",
         f"Scores: " + " · ".join(bits) if bits else "",
         f"Platform: {pack['platform']['name']}" +

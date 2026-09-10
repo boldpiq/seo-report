@@ -70,6 +70,13 @@ UPLOAD_EXTS = (".csv", ".zip", ".xlsx")
 
 JOB_GAP_SECONDS = int(os.environ.get("BOLDPIQ_JOB_GAP", "6"))
 JOB_TIMEOUT = int(os.environ.get("BOLDPIQ_JOB_TIMEOUT", "600"))
+# Whole-site audits measure every page in Chrome one at a time (~1 min a page in
+# the container), so they need far longer than a single-page run. The per-page
+# allowance is generous on purpose: a timeout throws the whole report away.
+SITE_MAX_PAGES = int(os.environ.get("BOLDPIQ_SITE_MAX_PAGES", "100"))
+SITE_SECONDS_PER_PAGE = int(os.environ.get("BOLDPIQ_SITE_SECONDS_PER_PAGE", "150"))
+SITE_PROGRESS = re.compile(r"\[(\d+)/(\d+)\]\s+measuring in chrome\s+(\S+)")
+SCAN_PROGRESS = re.compile(r"scanned (\d+)/(\d+)")
 MAX_JOBS_KEPT = 200
 
 VALID_HOST = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-._]{0,251}[a-zA-Z0-9])?$")
@@ -177,9 +184,14 @@ def _run_job(job):
             cmd += ["--keyphrase", job["keyphrase"]]
         if job["form_factor"] == "desktop":
             cmd += ["--desktop"]
+        if (job.get("opts") or {}).get("site"):
+            cmd += ["--site", f"--max-pages={job['opts']['max_pages']}"]
         # Lighthouse is mandatory: every report must be a real measurement of the
         # live page, never a structural-scan-only shortcut. The flag is ignored.
 
+    site_job = job.get("kind") != "rank" and (job.get("opts") or {}).get("site")
+    timeout = (900 + SITE_SECONDS_PER_PAGE * job["opts"]["max_pages"]) if site_job \
+        else JOB_TIMEOUT
     lines = []
     try:
         proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
@@ -188,15 +200,36 @@ def _run_job(job):
         _set(job, state="error", error=f"Could not start the report: {err}")
         return
 
-    deadline = time.time() + JOB_TIMEOUT
+    deadline = time.time() + timeout
     for line in proc.stdout:
         line = line.rstrip()
         lines.append(line)
         low = line.lower()
-        for needle, message, percent in PROGRESS:
-            if needle in low:
-                _set(job, message=message, percent=percent)
         stripped = line.strip()
+        if site_job:
+            # Page-by-page progress. Chrome is the slow lane, so it drives the bar.
+            m = SITE_PROGRESS.search(stripped)
+            if m:
+                i, n = int(m.group(1)), int(m.group(2))
+                _set(job, message=f"Measuring page {i} of {n} in Chrome — {m.group(3)}",
+                     percent=12 + round(78 * (i - 1) / max(n, 1)))
+            elif SCAN_PROGRESS.search(stripped) and (job.get("percent") or 0) < 12:
+                _set(job, message="Scanning every page's structure…", percent=10)
+            elif "discovering pages" in low:
+                _set(job, message="Reading the sitemap and finding every page…", percent=4)
+            elif stripped.startswith("found ") and "live pages" in stripped:
+                _set(job, message=stripped[0].upper() + stripped[1:], percent=8)
+            elif "checking site structure" in low:
+                _set(job, message="Checking links, sitemap and duplicates across the site…",
+                     percent=10)
+            elif "waiting for the structural scans" in low:
+                _set(job, message="Finishing the last structural scans…", percent=90)
+            elif "rendering pdf" in low:
+                _set(job, message="Building the PDF report…", percent=92)
+        else:
+            for needle, message, percent in PROGRESS:
+                if needle in low:
+                    _set(job, message=message, percent=percent)
         if stripped.startswith("CHECK "):
             # One line per source that did not return data. Surfaced live in the
             # panel so a broken key is seen while the operator is still at the
@@ -210,8 +243,12 @@ def _run_job(job):
                 _set(job, checks=checks)
         elif stripped.startswith("CHECKS:"):
             _set(job, checks_summary=stripped[len("CHECKS:"):].strip())
+        elif stripped.endswith("measured in Chrome)") and "pages audited" in stripped:
+            _set(job, summary=stripped)
         elif stripped.startswith("overall "):
-            _set(job, summary=stripped, message="Finishing up…", percent=92)
+            prev = job.get("summary") or ""
+            _set(job, summary=(prev + "\n" + stripped).strip(),
+                 message="Finishing up…", percent=95)
         elif stripped.startswith("lighthouse "):
             # Second summary line. Append rather than replace — dropping it was why
             # reports looked like they had no Chrome measurements.
@@ -220,8 +257,9 @@ def _run_job(job):
         if time.time() > deadline:
             proc.kill()
             _set(job, state="error",
-                 error="The scan took too long and was stopped. The site may be "
-                       "very slow, or blocking automated requests.")
+                 error=f"The scan took longer than {timeout // 60} minutes and was "
+                       "stopped. The site may be very slow, or blocking automated "
+                       "requests.")
             return
 
     proc.wait()
@@ -342,10 +380,15 @@ def _worker():
 
 
 def _report_url(pdf_name, mtime):
-    """The audited URL, read from the report's JSON companion. Cached by mtime."""
-    key = (pdf_name, mtime)
-    if key in _URL_CACHE:
-        return _URL_CACHE[key]
+    """The audited URL, read from the report's JSON companion. Cached per file by mtime.
+
+    One entry per report, replaced when the file changes. (This used to clear the
+    whole cache on every miss, so every listing re-read every JSON — harmless at
+    40 KB, not with multi-megabyte whole-site records.)
+    """
+    hit = _URL_CACHE.get(pdf_name)
+    if hit and hit[0] == mtime:
+        return hit[1]
     url = ""
     if pdf_name.lower().endswith(".pdf"):
         side = os.path.join(REPORTS, pdf_name[:-4] + ".json")
@@ -354,8 +397,7 @@ def _report_url(pdf_name, mtime):
                 url = (json.load(fh) or {}).get("url") or ""
         except (OSError, ValueError):
             url = ""
-    _URL_CACHE.clear()          # single-entry-per-file is enough; keeps this unbounded-safe
-    _URL_CACHE[key] = url
+    _URL_CACHE[pdf_name] = (mtime, url)
     return url
 
 
@@ -372,8 +414,10 @@ def _recent_reports(limit=25):
         except OSError:
             continue
         base = os.path.join(REPORTS, name[:-4])
+        site, _, rest = name.partition("-visibility-report-")
         out.append({"file": name,
-                    "site": name.split("-visibility-report-")[0],
+                    "site": site,
+                    "scope": "site" if rest.startswith("site-") else "page",
                     "url": _report_url(name, stat.st_mtime),
                     "fixes": os.path.isfile(base + "-fixes.json")
                              or os.path.isfile(base + ".json"),
@@ -446,6 +490,11 @@ def _fixpack_for(pdf_name):
     try:
         with open(scan_json, "r", encoding="utf-8") as fh:
             data = json.load(fh)
+        if data.get("mode") == "site":
+            # Every whole-site run writes its own pack; there is no older format
+            # to rebuild from. Analysing this file as one page would be nonsense.
+            return None, ("The fix list for this whole-site report is missing. "
+                          "Re-run the audit.")
         import seo_report                      # local: never break the server on import
         import fixpack
         an = seo_report.analyse(data)
@@ -492,7 +541,9 @@ class Handler(BaseHTTPRequestHandler):
         keep = ("id", "url", "client", "state", "message", "percent", "pdf",
                 "summary", "error", "checks", "checks_summary")
         with _jobs_lock:
-            return {k: job.get(k) for k in keep}
+            out = {k: job.get(k) for k in keep}
+            out["scope"] = "site" if (job.get("opts") or {}).get("site") else "page"
+            return out
 
     # -- routes --
     def do_GET(self):
@@ -692,12 +743,21 @@ class Handler(BaseHTTPRequestHandler):
                 kind="rank", opts=opts,
             )
         else:
+            # Whole site is the default: a website is every page, not the one
+            # address typed in. "single_page" is the deliberate opt-out.
+            site = not payload.get("single_page")
+            try:
+                max_pages = int(payload.get("max_pages") or SITE_MAX_PAGES)
+            except (TypeError, ValueError):
+                max_pages = SITE_MAX_PAGES
+            max_pages = max(1, min(max_pages, SITE_MAX_PAGES))
             job = _new_job(
                 url=url,
                 client=(payload.get("client") or "").strip()[:120],
                 keyphrase=(payload.get("keyphrase") or "").strip()[:120],
                 form_factor="desktop" if payload.get("desktop") else "mobile",
                 lighthouse=True,   # always — see _run_job
+                opts={"site": True, "max_pages": max_pages} if site else {},
             )
         _queue.put(job)
         _queue_positions()

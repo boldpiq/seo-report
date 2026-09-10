@@ -638,6 +638,9 @@ def parse(raw):
             "id": aid, "name": name, "abbr": abbr, "meaning": meaning,
             "target": target, "value": a.get("displayValue") or str(num),
             "rating": rating, "core": abbr in ("LCP", "CLS", "TBT"),
+            # Raw value, so a whole-site audit can take a median across pages
+            # instead of averaging display strings.
+            "numeric": num, "good": good, "poor": poor,
         })
 
     def savings(a):

@@ -38,12 +38,12 @@
 
   label{display:block;font-size:13px;font-weight:600;letter-spacing:.01em;margin:0 0 7px}
   .hint{font-size:12.5px;color:var(--muted-dim);margin:6px 0 0;line-height:1.5}
-  input[type=text]{
+  input[type=text],input[type=number]{
     width:100%;padding:13px 15px;border-radius:11px;background:rgba(0,0,0,.28);
     border:1px solid var(--border);color:var(--paper);font-size:15px;font-family:inherit;
     transition:border-color .18s,box-shadow .18s}
-  input[type=text]::placeholder{color:rgba(255,255,255,.28)}
-  input[type=text]:focus{outline:none;border-color:var(--accent);
+  input[type=text]::placeholder,input[type=number]::placeholder{color:rgba(255,255,255,.28)}
+  input[type=text]:focus,input[type=number]:focus{outline:none;border-color:var(--accent);
     box-shadow:0 0 0 3px rgba(196,84,26,.18)}
   .field{margin-bottom:22px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
@@ -81,7 +81,11 @@
     border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:none}
   @keyframes spin{to{transform:rotate(360deg)}}
   .elapsed{font-size:12.5px;color:var(--muted-dim);margin-top:10px}
-  .scores{font-size:13.5px;color:var(--muted);margin-top:14px;font-variant-numeric:tabular-nums}
+  .scores{font-size:13.5px;color:var(--muted);margin-top:14px;font-variant-numeric:tabular-nums;
+    white-space:pre-line}
+  .rep .scope{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--accent);border:1px solid rgba(196,84,26,.5);
+    border-radius:6px;padding:1px 6px;margin-left:8px;vertical-align:2px}
 
   .done{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:20px}
   .btn{display:inline-block;padding:12px 20px;border-radius:11px;font-size:14px;
@@ -139,9 +143,11 @@
   <header>
     <div class="eyebrow"><i></i><span>Boldpiq · Internal</span></div>
     <h1>Website <em>Audit</em></h1>
-    <p class="lede">Enter a prospect's website address and get a branded PDF
-      visibility report. Takes about a minute — most of that is measuring the
-      site's real load speed in Chrome.</p>
+    <p class="lede">Enter a website address and get one branded PDF covering
+      every page on the site: it reads the sitemap, follows the site's own links,
+      and audits each page. Allow about a minute per page — a 20-page site takes
+      around 20 minutes. You can close this tab; the finished report appears under
+      Recent reports.</p>
   </header>
 
   <div class="card">
@@ -165,8 +171,21 @@
           <div class="field">
             <label for="keyphrase">Target keyphrase <span style="color:var(--muted-dim);font-weight:400">(optional)</span></label>
             <input type="text" id="keyphrase" name="keyphrase" placeholder="roof repairs cape town">
-            <p class="hint">Scores the site against a search term you'd expect it to rank for.</p>
+            <p class="hint">Scores the site against a search term you'd expect it to rank for. On a whole-site audit it is applied to the homepage only.</p>
           </div>
+
+          <div class="field" id="maxfield">
+            <label for="maxpages">Most pages to audit</label>
+            <input type="number" id="maxpages" min="1" max="100" step="1" placeholder="100">
+            <p class="hint">Leave blank to audit every page, up to 100. Pages over the limit are still listed in the report — never silently left out.</p>
+          </div>
+
+          <label class="toggle">
+            <input type="checkbox" id="single">
+            <span>Only audit this one page
+              <span class="hint">Skips the rest of the site. Use it for a quick look at one landing page — about a minute.</span>
+            </span>
+          </label>
 
           <label class="toggle">
             <input type="checkbox" id="desktop">
@@ -235,11 +254,11 @@ async function loadRecent(){
         day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
       const f = encodeURIComponent(r.file);
       return `<div class="rep">
-        <span class="who"><span class="site">${r.site}</span><span class="meta">${when} · ${r.size_kb} KB</span></span>
+        <span class="who"><span class="site">${r.site}</span>${r.scope === "site" ? `<span class="scope">Whole site</span>` : ""}<span class="meta">${when} · ${r.size_kb} KB</span></span>
         <span class="acts">
           <a class="dl" href="/download/${f}" target="_blank" rel="noopener">Open ↗</a>
           ${r.fixes ? `<a class="dl fixes" href="/fixes/${f}?v=${Math.round(r.modified)}" target="_blank" rel="noopener">Fixes ↗</a>` : ""}
-          ${r.url ? `<button class="redo" type="button" data-url="${escapeHtml(r.url)}" aria-label="Run the audit again for ${r.site}">Redo</button>` : ""}
+          ${r.url ? `<button class="redo" type="button" data-url="${escapeHtml(r.url)}" data-scope="${r.scope}" aria-label="Run the audit again for ${r.site}">Redo</button>` : ""}
           <button class="del" type="button" data-file="${f}" data-site="${r.site}" aria-label="Delete report for ${r.site}">Delete</button>
         </span>
       </div>`;
@@ -251,6 +270,8 @@ document.addEventListener("click", (ev) => {
   const btn = ev.target.closest(".rep .redo");
   if(!btn) return;
   $("url").value = btn.dataset.url;
+  // Redo repeats what was run: a single-page report stays single-page.
+  $("single").checked = btn.dataset.scope === "page";
   window.scrollTo({ top: 0, behavior: "smooth" });
   // Reuse the real submit path rather than duplicating the fetch/poll logic.
   $("form").requestSubmit();
@@ -338,11 +359,13 @@ $("form").addEventListener("submit", async e => {
   $("fill").style.width = "4%";
   $("spin").style.display = "";
   started = Date.now();
+  const single = $("single").checked;
 
   timer = setInterval(() => {
     $("elapsed").textContent =
       "Elapsed " + fmtTime(Math.floor((Date.now()-started)/1000)) +
-      " · a typical report takes about a minute";
+      (single ? " · a typical report takes about a minute"
+              : " · about a minute per page — safe to close this tab, the report will appear under Recent reports");
   }, 1000);
 
   let job;
@@ -354,6 +377,8 @@ $("form").addEventListener("submit", async e => {
         client: $("client").value.trim(),
         keyphrase: $("keyphrase").value.trim(),
         desktop: $("desktop").checked,
+        single_page: single,
+        max_pages: parseInt($("maxpages").value, 10) || null,
       })
     });
     job = await res.json();
