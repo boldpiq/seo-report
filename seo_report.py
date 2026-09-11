@@ -1460,6 +1460,10 @@ SITE_MAX_PAGES = int(os.environ.get("BOLDPIQ_SITE_MAX_PAGES", "100"))
 # Between structural scans. Longer than the single-page gap: a whole-site run is
 # many scans in a row, and seoscore.tools' terms ask for restraint.
 SITE_SCAN_GAP = float(os.environ.get("BOLDPIQ_SITE_SCAN_GAP", "8"))
+# After the scanner first refuses this domain, and before each retry of a
+# refused page. Still well inside the time the Chrome lane needs anyway.
+SITE_SCAN_SLOW_GAP = float(os.environ.get("BOLDPIQ_SITE_SCAN_SLOW_GAP", "45"))
+SITE_SCAN_RETRY_WAIT = float(os.environ.get("BOLDPIQ_SITE_SCAN_RETRY_WAIT", "90"))
 
 
 def run_site(url, a):
@@ -1484,22 +1488,42 @@ def run_site(url, a):
     n = len(results)
 
     def scan_lane():
+        # The scanner rate-limits PER DOMAIN ("scanned too frequently" — seen on
+        # JMT, 2 of 32 pages lost on 2026-09-11). This lane has slack: Chrome
+        # takes ~1 min a page, scans take seconds. So on the first refusal the
+        # lane slows right down for the rest of the run, and refused pages are
+        # retried at the end after a long pause instead of hammered at once.
+        gap = SITE_SCAN_GAP
+        deferred = []
         for i, r in enumerate(results):
             if i:
-                time.sleep(SITE_SCAN_GAP)
+                time.sleep(gap)
             # A keyphrase belongs to one page. Applied to all of them it would
             # flag "keyphrase missing" on every room and policy page.
             kp = a.keyphrase if i == 0 else ""
-            for attempt in (1, 2):
+            try:
+                r["scan"], r["scan_error"] = scan(r["url"], kp), None
+            except SystemExit as err:              # scan() exits; one page must not
+                r["scan_error"] = str(err)[:200]
+                if "429" in r["scan_error"] or "too frequently" in r["scan_error"]:
+                    gap = max(gap, SITE_SCAN_SLOW_GAP)
+                deferred.append((i, r, kp))
+            print(f"   scanned {i + 1}/{n} {sw.path_of(r['url'])}"
+                  + ("" if r["scan"] else " — will retry"), flush=True)
+        for rnd in range(2):
+            if not deferred:
+                break
+            left = []
+            for i, r, kp in deferred:
+                time.sleep(SITE_SCAN_RETRY_WAIT)
                 try:
                     r["scan"], r["scan_error"] = scan(r["url"], kp), None
-                    break
-                except SystemExit as err:          # scan() exits; one page must not
+                except SystemExit as err:
                     r["scan_error"] = str(err)[:200]
-                    if attempt == 1:
-                        time.sleep(30)
-            print(f"   scanned {i + 1}/{n} {sw.path_of(r['url'])}"
-                  + ("" if r["scan"] else " — not measured"), flush=True)
+                    left.append((i, r, kp))
+                print(f"   rescanned {sw.path_of(r['url'])}"
+                      + ("" if r["scan"] else " — not measured"), flush=True)
+            deferred = left
 
     lane = threading.Thread(target=scan_lane, daemon=True, name="scan-lane")
     lane.start()
