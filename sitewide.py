@@ -26,6 +26,7 @@ Stdlib only.
 
 import gzip
 import hashlib
+import html as html_mod
 import re
 import statistics
 import time
@@ -208,8 +209,10 @@ def facts(resp, root):
         "redirected": bool(resp["hops"]),
         "hops": resp["hops"],
         "html": bool(html),
-        "title": _one(r"<title[^>]*>(.*?)</title>", html) if html else "",
-        "description": _meta(html, "description") if html else "",
+        # Unescaped: a title of "Vintage &amp; Thrift" is "Vintage & Thrift", and
+        # the report escapes it again on the way out.
+        "title": html_mod.unescape(_one(r"<title[^>]*>(.*?)</title>", html)) if html else "",
+        "description": html_mod.unescape(_meta(html, "description")) if html else "",
         "h1": len(re.findall(r"<h1[\s>]", html, re.I)) if html else 0,
         "canonical": urllib.parse.urljoin(resp["final"], canon) if canon else "",
         "noindex": "noindex" in robots_meta or "noindex" in x_robots,
@@ -254,8 +257,12 @@ def _read_sitemaps(candidates, log):
 
 # ── discovery ────────────────────────────────────────────────────────────────
 
-def discover(start, limit=100, log=print):
+def discover(start, limit=100, log=print, keep_body=False):
     """Find every page and gather what the cross-page checks need.
+
+    keep_body keeps each page's HTML on its facts as `_body`, so a caller that
+    needs the markup (rank-report's gate) reuses this crawl instead of fetching
+    every page a second time. Working data — strip it before writing JSON.
 
     Sitemap URLs are always checked (up to SITEMAP_CAP) because the sitemap is
     the site's own claim about what exists. Link crawling adds what the sitemap
@@ -298,6 +305,8 @@ def discover(start, limit=100, log=print):
     # to be excluded from its own audit.
     pages[key(home["final"])] = dict(facts(home, root), url=home["final"],
                                      redirected=False, hops=[], depth=0)
+    if keep_body:
+        pages[key(home["final"])]["_body"] = home["body"]
     queue = deque()
 
     def enqueue_links(src_facts):
@@ -318,6 +327,8 @@ def discover(start, limit=100, log=print):
     def visit(u):
         r = fetch(u)
         f = facts(r, root)
+        if keep_body:
+            f["_body"] = r["body"]
         pages[key(u)] = f
         fk = key(f["final"])
         if f["redirected"] and fk != key(u) and bare_host(f["final"]) == root \
@@ -449,6 +460,18 @@ def _finding(fid, title, priority, effort, why, fix, pages, detail_ok, detail_ba
                       else "Not measured — " + unmeasured)}
 
 
+def _per_page(groups, note):
+    """Duplicate groups → one row per affected page, so "8 pages share a title"
+    lists eight pages rather than one representative per group."""
+    rows = []
+    for g in groups:
+        for x in g:
+            rest = [path_of(y["url"]) for y in g if y is not x]
+            others = ", ".join(rest[:3]) + (f" +{len(rest) - 3} more" if len(rest) > 3 else "")
+            rows.append({"url": x["url"], "note": note(x, others)})
+    return rows
+
+
 def structure(disc, hosts=None):
     """The findings only a whole-site crawl can make. Returns a list of findings."""
     pages = disc["pages"]
@@ -527,8 +550,7 @@ def structure(disc, hosts=None):
         "show, and the two split whatever authority the page has earned.",
         "Keep one address per page. 301-redirect the others to it, or point their "
         "canonical tag at the one you want ranked.",
-        [{"url": g[0]["url"], "note": "identical to " + ", ".join(path_of(x["url"]) for x in g[1:4])}
-         for g in dups],
+        _per_page(dups, lambda x, others: "identical to " + others),
         "No duplicate pages found.",
         f"{sum(len(g) for g in dups)} pages are exact duplicates of another page."))
 
@@ -549,11 +571,7 @@ def structure(disc, hosts=None):
         "sees the same headline twice and trusts neither.",
         "Write a unique title for each page that says what that page offers and "
         "where — for example 'Family Suite with Mountain View | Lodge Name, Clarens'.",
-        [{"url": g[0]["url"],
-          "note": f"“{g[0]['title'][:70]}” — also on "
-                  + ", ".join(path_of(x["url"]) for x in g[1:4])
-                  + (f" +{len(g) - 4} more" if len(g) > 4 else "")}
-         for g in dt],
+        _per_page(dt, lambda x, others: f"“{x['title'][:70]}” — also on " + others),
         "Every page has a distinct title.",
         f"{sum(len(g) for g in dt)} pages share a title with another page."))
 
@@ -564,10 +582,7 @@ def structure(disc, hosts=None):
         "means Google usually writes its own from random page text instead.",
         "Give each page a unique 140–160 character description that sells that "
         "specific page.",
-        [{"url": g[0]["url"],
-          "note": "shared with " + ", ".join(path_of(x["url"]) for x in g[1:4])
-                  + (f" +{len(g) - 4} more" if len(g) > 4 else "")}
-         for g in dd],
+        _per_page(dd, lambda x, others: "same description as " + others),
         "Every page with a description has its own.",
         f"{sum(len(g) for g in dd)} pages share a description with another page."))
 
@@ -621,9 +636,14 @@ def structure(disc, hosts=None):
     out.append(_finding(
         "missing_from_sitemap", "Every page is in the sitemap", "medium", "low",
         "Google still finds pages by following links, but a page left out of the "
-        "sitemap is discovered later and re-checked less often.",
-        "Add these pages to the sitemap. On most platforms that means making sure "
-        "the page is published and not excluded in the SEO settings.",
+        "sitemap is discovered later and re-checked less often. Some of these may "
+        "be left out on purpose — which is only safe if the page also tells Google "
+        "not to index it.",
+        "Decide for each page. If it should be found in search, add it to the "
+        "sitemap (on most platforms: publish it and make sure it is not excluded in "
+        "the SEO settings). If it is private or internal — a staff page, a login, an "
+        "admin portal — do not add it: mark it noindex, and consider whether it "
+        "should be linked from public pages at all.",
         [{"url": f["url"], "note": "linked from the site but not in the sitemap"}
          for f in missing],
         "Every page found by following links is in the sitemap.",

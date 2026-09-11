@@ -75,6 +75,9 @@ JOB_TIMEOUT = int(os.environ.get("BOLDPIQ_JOB_TIMEOUT", "600"))
 # allowance is generous on purpose: a timeout throws the whole report away.
 SITE_MAX_PAGES = int(os.environ.get("BOLDPIQ_SITE_MAX_PAGES", "100"))
 SITE_SECONDS_PER_PAGE = int(os.environ.get("BOLDPIQ_SITE_SECONDS_PER_PAGE", "150"))
+# The ranking report now walks every page (sitemaps + the site's own links)
+# before anything else; on a few-hundred-page site that alone is minutes.
+RANK_TIMEOUT = int(os.environ.get("BOLDPIQ_RANK_TIMEOUT", "1800"))
 SITE_PROGRESS = re.compile(r"\[(\d+)/(\d+)\]\s+measuring in chrome\s+(\S+)")
 SCAN_PROGRESS = re.compile(r"scanned (\d+)/(\d+)")
 MAX_JOBS_KEPT = 200
@@ -95,7 +98,9 @@ PROGRESS = [
     ("measuring in chrome", "Measuring real load speed in Chrome…",        40),
     ("rendering pdf",       "Building the PDF report…",                    85),
     # rank-report's own progress lines
+    ("finding every page",  "Reading the sitemap and finding every page…",  8),
     ("crawl gate",          "Checking every page is its own document…",    20),
+    ("site structure",      "Checking links, sitemap and duplicates across the site…", 30),
     ("competitors",         "Measuring the competition…",                  50),
     ("proximity",           "Measuring distance to each target area…",     70),
 ]
@@ -191,7 +196,7 @@ def _run_job(job):
 
     site_job = job.get("kind") != "rank" and (job.get("opts") or {}).get("site")
     timeout = (900 + SITE_SECONDS_PER_PAGE * job["opts"]["max_pages"]) if site_job \
-        else JOB_TIMEOUT
+        else RANK_TIMEOUT if job.get("kind") == "rank" else JOB_TIMEOUT
     lines = []
     try:
         proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
